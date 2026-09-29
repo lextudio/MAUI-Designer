@@ -43,4 +43,3 @@ dotnet run --project ICSharpCode.MauiDesigner.IntegrationTests/ICSharpCode.MauiD
 ```
 
 The GPL side's design notes and progress log are in `../maui-designer-native/OPENDEVELOP-ADDIN.md`.
-`_superseded/` holds the first design surface, which depended on GPL code; it is not built.

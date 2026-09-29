@@ -647,8 +647,8 @@ option A: the shared canvas rather than the bespoke `MauiDesignSurface`.
 
 - **Surface = the shared `UnoDesignSurfaceControl`** (the WinUI/Uno designer's canvas: `DesignerCanvas`
   toolbar, zoom/fit, selection adorner, 8 handles, drag, context menu), source-linked from OpenDevelop
-  because it is a pure view with no protocol code. `MauiDesignSurface`/`MAUIDesigner.Surface` are no
-  longer used by the view content (kept for now; their tests still pass).
+  because it is a pure view with no protocol code. `MauiDesignSurface`/`MAUIDesigner.Surface` were
+  deleted on 2026-09-29 (nothing referenced them any more).
 - **Frames are BGRA32**, not PNG: the shared surface decodes with managed code because WPF's PNG
   decoder is a native WIC codec LibreWPF lacks. `Width/Height` are pixels, `Dpi` the scale; the
   AppKit renderer redraws the capture into premultiplied BGRA (row 0 = top — the native test checks
