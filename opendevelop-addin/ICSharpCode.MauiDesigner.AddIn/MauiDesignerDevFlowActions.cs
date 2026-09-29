@@ -305,7 +305,7 @@ public static class MauiDesignerDevFlowActions
         return size == null ? Error($"'{label}' names no size.") : Await(view => view.SetDesignSizeAsync(size.Value.Width, size.Value.Height));
     }
 
-    [DevFlowAction("od.maui-designer.source-toolbox", Description = "What the Toolbox pad shows for a MAUI file's SOURCE editor (IToolsHost.ToolsContent): whether it is the MAUI scope and which MAUI items it offers")]
+    [DevFlowAction("od.maui-designer.source-toolbox", Description = "What the Toolbox pad shows for a MAUI file's SOURCE editor (IToolsHost.ToolsContent): whether it is the MAUI scope, which MAUI items it offers, and the cached catalog it starts from")]
     public static string SourceToolbox() => OnUi(() =>
     {
         var window = SD.Workbench.ActiveWorkbenchWindow;
@@ -322,6 +322,10 @@ public static class MauiDesignerDevFlowActions
             mauiItems = toolbox.ItemCount(MauiToolbox.Scope),
             visibleItems = toolbox.VisibleItemCount,
             hasEntry = toolbox.FindItem(MauiToolbox.Scope, "Entry") != null,
+            // The on-disk catalog a later session starts from before any design view has run.
+            cacheFile = MauiToolbox.CachePath,
+            cachedItems = MauiToolbox.LoadCache()?.Toolbox.Count ?? 0,
+            cacheHasEntry = MauiToolbox.LoadCache()?.Toolbox.Any(item => item.TypeName == "Entry") ?? false,
         }, Json);
     });
 

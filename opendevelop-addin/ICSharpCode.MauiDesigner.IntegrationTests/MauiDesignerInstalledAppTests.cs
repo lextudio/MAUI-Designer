@@ -132,6 +132,13 @@ public sealed class MauiDesignerInstalledAppTests
             AssertOk(await child.InvokeAsync("od.open-solution", projectPath), "open solution");
             Assert.True((await child.InvokeAsync("od.open-file", pagePath)).GetProperty("opened").GetBoolean());
 
+            // 0. Source view only, before any design view has run: a catalog cached by an earlier
+            //    session already fills the Toolbox (the host would otherwise be its only source).
+            var beforeDesign = await child.InvokeAsync("od.maui-designer.source-toolbox");
+            AssertOk(beforeDesign, "source toolbox before design");
+            if (beforeDesign.GetProperty("cacheHasEntry").GetBoolean())
+                Assert.True(beforeDesign.GetProperty("hasEntry").GetBoolean(), beforeDesign.ToString());
+
             // 1. Ownership: the MAUI designer is the ONLY design view (no WPF tab beside it).
             var noWpf = await child.InvokeAsync("od.activate-secondary-view", pagePath, "ICSharpCode.WpfDesign.AddIn.WpfViewContent");
             Assert.False(noWpf.GetProperty("success").GetBoolean(), noWpf.ToString());
@@ -156,6 +163,8 @@ public sealed class MauiDesignerInstalledAppTests
             Assert.True(sourceToolbox.GetProperty("isSharedToolbox").GetBoolean(), sourceToolbox.ToString());
             Assert.True(sourceToolbox.GetProperty("hasEntry").GetBoolean(), sourceToolbox.ToString());
             Assert.Equal(sourceToolbox.GetProperty("mauiItems").GetInt32(), sourceToolbox.GetProperty("visibleItems").GetInt32());
+            //     ...and the host's catalog is now cached for the next session.
+            Assert.True(sourceToolbox.GetProperty("cacheHasEntry").GetBoolean(), sourceToolbox.ToString());
 
             // 2b. Design size: Tablet re-renders the page at 768x1024 without touching the document;
             //     back to Phone for the rest of the journey.

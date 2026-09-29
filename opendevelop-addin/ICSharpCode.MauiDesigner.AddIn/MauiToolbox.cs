@@ -1,3 +1,7 @@
+using System.IO;
+using System.Text.Json;
+
+using ICSharpCode.Core;
 using ICSharpCode.SharpDevelop;
 using ICSharpCode.SharpDevelop.Designer.Remote;
 using ICSharpCode.SharpDevelop.Gui;
@@ -33,11 +37,22 @@ public sealed class MauiToolbox
     MauiToolbox()
     {
         SharedToolbox.Instance.AddItems(new[] { new SharedToolboxItem(DefaultCategory, "Pointer", Scope, onActivated: () => { }) });
+        // The catalog only arrives when a design view starts the host. Without a cache, a MAUI
+        // file opened in its XAML source view offered an empty toolbox until the Design tab had
+        // been visited once. The last catalog the host sent stands in until the next one arrives.
+        if (LoadCache() is { } cached)
+            AddItems(cached);
     }
 
-    /// <summary>Adds the host's catalog. Items already present are kept, so a second document
-    /// (or a restarted host) does not duplicate them.</summary>
+    /// <summary>Adds the host's catalog and remembers it for the next session. Items already
+    /// present are kept, so a second document (or a restarted host) does not duplicate them.</summary>
     public void Populate(DesignerCapabilities capabilities)
+    {
+        AddItems(capabilities);
+        SaveCache(capabilities);
+    }
+
+    void AddItems(DesignerCapabilities capabilities)
     {
         var items = capabilities.Toolbox
             .Where(item => !string.IsNullOrEmpty(item.TypeName) && added.Add(item.TypeName))
@@ -45,6 +60,43 @@ public sealed class MauiToolbox
             .ToList();
         if (items.Count > 0)
             SharedToolbox.Instance.AddItems(items);
+    }
+
+    internal static string CachePath => Path.Combine(PropertyService.ConfigDirectory, "MauiDesigner", "toolbox-cache.json");
+
+    internal static DesignerCapabilities? LoadCache()
+    {
+        try
+        {
+            return File.Exists(CachePath)
+                ? JsonSerializer.Deserialize<DesignerCapabilities>(File.ReadAllText(CachePath))
+                : null;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException)
+        {
+            LoggingService.Warn("MAUI designer: ignoring an unreadable toolbox cache: " + e.Message);
+            return null;
+        }
+    }
+
+    static void SaveCache(DesignerCapabilities capabilities)
+    {
+        if (capabilities.Toolbox.Count == 0)
+            return;
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(CachePath)!);
+            File.WriteAllText(CachePath, JsonSerializer.Serialize(new DesignerCapabilities
+            {
+                Runtime = capabilities.Runtime,
+                Version = capabilities.Version,
+                Toolbox = capabilities.Toolbox,
+            }));
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            LoggingService.Warn("MAUI designer: could not write the toolbox cache: " + e.Message);
+        }
     }
 
     /// <summary>The DDP item for a type in the MAUI XAML namespace (DevFlow and tests).</summary>
