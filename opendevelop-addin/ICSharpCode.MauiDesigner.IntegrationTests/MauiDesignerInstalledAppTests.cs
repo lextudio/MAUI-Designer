@@ -139,6 +139,31 @@ public sealed class MauiDesignerInstalledAppTests
             if (beforeDesign.GetProperty("cacheHasEntry").GetBoolean())
                 Assert.True(beforeDesign.GetProperty("hasEntry").GetBoolean(), beforeDesign.ToString());
 
+            // 0b. Language service: the markup is analysed as MAUI. Completing the "Label" of
+            //     <Label> resolves to MAUI's Label: before the dialect named its language-server
+            //     framework, a MAUI page got the WPF server (System.Windows.Controls.Label), and
+            //     with --framework MAUI but WPF's Tier-1 assemblies, nothing at all. Asked twice,
+            //     the second time after the Tier-2 prewarm had its chance to replace Tier 1: this
+            //     temporary project is never restored, so its full compilation has no MAUI types.
+            async Task<string[]> LabelCompletionTypes()
+            {
+                JsonElement completions = default;
+                var completed = await OpenDevelopAppFixture.PollUntilAsync(async () =>
+                {
+                    completions = await child.InvokeAsync("od.completions", pagePath, 5, 6);
+                    return completions.TryGetProperty("count", out var count) && count.GetInt32() > 0;
+                }, TimeSpan.FromSeconds(90));
+                Assert.True(completed, "No completions for the MAUI page: " + completions);
+                return completions.GetProperty("items").EnumerateArray()
+                    .Where(i => i.GetProperty("displayText").GetString() == "Label")
+                    .Select(i => i.GetProperty("description").GetString() ?? "")
+                    .ToArray();
+            }
+
+            Assert.Equal(new[] { "Microsoft.Maui.Controls.Label" }, await LabelCompletionTypes());
+            await Task.Delay(TimeSpan.FromSeconds(20));
+            Assert.Equal(new[] { "Microsoft.Maui.Controls.Label" }, await LabelCompletionTypes());
+
             // 1. Ownership: the MAUI designer is the ONLY design view (no WPF tab beside it).
             var noWpf = await child.InvokeAsync("od.activate-secondary-view", pagePath, "ICSharpCode.WpfDesign.AddIn.WpfViewContent");
             Assert.False(noWpf.GetProperty("success").GetBoolean(), noWpf.ToString());

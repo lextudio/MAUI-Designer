@@ -1,6 +1,14 @@
 ﻿<AddIn name="MAUI Designer" author="MAUIDesigner" description="Visual designer for .NET MAUI XAML files." addInManagerHidden="preinstalled">
-  <Manifest><Identity name="ICSharpCode.MauiDesigner" /></Manifest>
-  <Runtime><Import assembly="ICSharpCode.MauiDesigner.dll" /></Runtime>
+  <Manifest>
+    <Identity name="ICSharpCode.MauiDesigner" />
+    <!-- The shared design canvas every OpenDevelop designer uses; this addin is its MAUI backend. -->
+    <Dependency addin="ICSharpCode.DesignerCanvas" requirePreload="true" />
+  </Manifest>
+  <Runtime>
+    <Import assembly="$ICSharpCode.DesignerCanvas/ICSharpCode.DesignerCanvas.dll" />
+    <Import assembly="$ICSharpCode.DesignerCanvas/ICSharpCode.Designer.Presentation.dll" />
+    <Import assembly="ICSharpCode.MauiDesigner.dll" />
+  </Runtime>
   <Path name="/SharpDevelop/Workbench/AutostartAfterWorkbenchInitialized">
     <!-- Registers the "Maui" dialect and its child host before any document is opened, so the
          workbench can route MAUI files to this addin without any other designer knowing MAUI. -->

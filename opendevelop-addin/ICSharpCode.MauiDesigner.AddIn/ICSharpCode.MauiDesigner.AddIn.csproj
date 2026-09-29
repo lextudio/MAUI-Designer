@@ -37,6 +37,9 @@
     <ProjectReference Include="$(OpenDevelopRoot)src/Main/Designer/Designer.Remote/Designer.Remote.csproj" Private="false" />
     <ProjectReference Include="$(OpenDevelopRoot)src/Main/Designer/Designer.Shell/Designer.Shell.csproj" Private="false" />
     <ProjectReference Include="$(OpenDevelopRoot)src/Main/Designer/Designer.Presentation/Designer.Presentation.csproj" Private="false" />
+    <!-- The shared design canvas (OpenDevelop's ICSharpCode.DesignerCanvas addin, MIT): this addin
+         supplies only its MAUI backend. Loaded from that addin at run time (see MauiDesigner.addin). -->
+    <ProjectReference Include="$(OpenDevelopRoot)src/AddIns/DisplayBindings/DesignerCanvas/ICSharpCode.DesignerCanvas.csproj" Private="false" />
     <!-- The shared Properties pad is Xceed's PropertyGrid: IPropertyGridEventSource for its Events view. -->
     <ProjectReference Include="$(OpenDevelopRoot)externals/wpftoolkit/ExtendedWPFToolkitSolution/Src/Xceed.Wpf.Toolkit/Xceed.Wpf.Toolkit.csproj" Private="false" />
     <!-- MIT siblings only. This addin is MIT-licensed and must not reference, link or source-include
@@ -59,6 +62,20 @@
     <MauiModelHostOutput Condition="'$(MauiModelHostOutput)' == ''">$(MauiDesignHostRoot)MAUIDesigner.Ddp.Host/bin/$(Configuration)/net10.0/</MauiModelHostOutput>
     <MauiNativeMacHostBundle Condition="'$(MauiNativeMacHostBundle)' == ''">$(MauiDesignHostRoot)MAUIDesigner.Host/bin/$(Configuration)/net10.0-macos/$(_MauiRid)/MAUIDesigner.Host.app</MauiNativeMacHostBundle>
   </PropertyGroup>
+
+  <!-- The MAUI XAML language server (maui-xaml-ls), bundled next to the addin under LanguageServer/
+       and registered for the MAUI dialect by MauiDesignerDisplayBinding.RegisterDialect. Built with
+       the addin; not referenced - it is a separate process. -->
+  <ItemGroup>
+    <ProjectReference Include="../MAUIDesigner.LanguageServer/MAUIDesigner.LanguageServer.csproj" ReferenceOutputAssembly="false" SkipGetTargetFrameworkProperties="true" Private="false" />
+  </ItemGroup>
+  <Target Name="BundleLanguageServer" AfterTargets="Build">
+    <ItemGroup>
+      <_MauiLanguageServerFile Include="$(MSBuildProjectDirectory)/../MAUIDesigner.LanguageServer/bin/$(Configuration)/net10.0/**/*" />
+    </ItemGroup>
+    <Warning Condition="'@(_MauiLanguageServerFile)' == ''" Text="maui-xaml-ls is not built; MAUI XAML will have no language service." />
+    <Copy SourceFiles="@(_MauiLanguageServerFile)" DestinationFiles="@(_MauiLanguageServerFile->'$(OutputPath)LanguageServer/%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+  </Target>
 
   <Target Name="BundleDesignHosts" AfterTargets="Build">
     <Warning Condition="!Exists('$(MauiModelHostOutput)MAUIDesigner.Ddp.Host.dll')"

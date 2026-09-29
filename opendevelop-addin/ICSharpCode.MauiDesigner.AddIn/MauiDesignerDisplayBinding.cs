@@ -55,6 +55,15 @@ public sealed class MauiDesignerDisplayBinding : IXamlDialectDisplayBinding
             // inserts a MAUI control (via the shared "ComponentTypeName" drop), not a WPF one.
             ToolsContent = () => MauiToolbox.Instance.ToolboxControl,
         });
+
+        // ...and its markup is analysed by MAUI's own language server, bundled next to this addin,
+        // never by another framework's.
+        var server = Path.Combine(Path.GetDirectoryName(typeof(MauiDesignerDisplayBinding).Assembly.Location)!,
+            "LanguageServer", "maui-xaml-ls.dll");
+        if (File.Exists(server))
+            XamlLanguageServers.Register(MauiXamlDialect.Dialect, server);
+        else
+            ICSharpCode.Core.LoggingService.Warn($"MAUI designer: {server} is missing; MAUI XAML has no language service.");
     }
 
     /// <summary>

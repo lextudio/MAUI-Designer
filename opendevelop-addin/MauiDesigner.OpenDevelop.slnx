@@ -5,4 +5,5 @@
   <Project Path="MAUIDesigner.Ddp.Client/MAUIDesigner.Ddp.Client.csproj" />
   <Project Path="MAUIDesigner.Dialect/MAUIDesigner.Dialect.csproj" />
   <Project Path="MAUIDesigner.Dialect.Tests/MAUIDesigner.Dialect.Tests.csproj" />
+  <Project Path="MAUIDesigner.LanguageServer/MAUIDesigner.LanguageServer.csproj" />
 </Solution>

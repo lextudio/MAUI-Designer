@@ -8,6 +8,7 @@ using ICSharpCode.SharpDevelop;
 using ICSharpCode.SharpDevelop.Designer;
 using ICSharpCode.SharpDevelop.Designer.Remote;
 using ICSharpCode.SharpDevelop.Designer.Shell;
+using ICSharpCode.SharpDevelop.Designer.Surface;
 using ICSharpCode.SharpDevelop.Gui;
 using ICSharpCode.SharpDevelop.Widgets;
 using ICSharpCode.SharpDevelop.WinForms;
@@ -20,8 +21,10 @@ namespace ICSharpCode.MauiDesigner;
 /// <summary>
 /// Hosts the MAUI design surface for one document. The page is rendered by the out-of-process
 /// child (<c>MAUIDesigner.Host</c>) and edited over DDP; this class is the in-process half: the
-/// designer canvas built from OpenDevelop's shared presentation (see MauiDesignCanvas),
-/// selection, the Properties/Outline/Toolbox pads, undo/redo, delete, and save.
+/// MAUI backend of OpenDevelop's shared design canvas (the ICSharpCode.DesignerCanvas addin:
+/// <see cref="DesignSurface"/> and its <see cref="DesignSurfaceController"/>, which own the toolbar,
+/// viewport, selection overlay, gestures and inline editor), the Properties/Outline/Toolbox pads,
+/// undo/redo, delete, and save.
 /// <para>
 /// The child owns the document. Every edit is a DDP mutation whose returned state (tree, frame,
 /// diagnostics) is applied here in one place, <see cref="Apply"/>; nothing edits XAML text in the
@@ -29,7 +32,7 @@ namespace ICSharpCode.MauiDesigner;
 /// most elements unnamed.
 /// </para>
 /// </summary>
-public sealed class MauiDesignerViewContent : AbstractViewContentHandlingLoadErrors,
+public sealed class MauiDesignerViewContent : AbstractViewContentHandlingLoadErrors, IDesignCanvasBackend,
     IOutlineContentHost, IToolsHost, IHasPropertyContainer, IUndoHandler, IClipboardHandler
 {
     public const string TabTitle = "Design";
@@ -53,7 +56,8 @@ public sealed class MauiDesignerViewContent : AbstractViewContentHandlingLoadErr
     // All state below is touched on the UI thread only: LoadInternal and the surface/pad events
     // start every chain; every await on the child is followed by `await UiThread.Switch()`
     // before anything here is touched (see UiThread for why a captured context is not enough).
-    readonly MauiDesignCanvas surface = new();
+    readonly DesignSurface surface = new();
+    readonly DesignSurfaceController canvas;
     readonly DocumentOutlineControl outline = new();
     readonly PropertyContainer propertyContainer = new();
     readonly List<SDTask> tasks = new();
@@ -80,31 +84,36 @@ public sealed class MauiDesignerViewContent : AbstractViewContentHandlingLoadErr
     int loadGeneration;
     bool disposed;
     bool syncingOutline;
-
-    // Drag-move / drag-resize in progress (design units).
-    string? dragId;
-    string dragHandle = "";
-    (double X, double Y, double Width, double Height) dragStart;
-    (double X, double Y, double Width, double Height) dragCurrent;
+    // Set while this class pushes its selection into the canvas, so the canvas's SelectionChanged
+    // echo is not taken for a user selection.
+    bool syncingCanvas;
 
     public MauiDesignerViewContent(OpenedFile file) : base(file)
     {
         TabPageText = TabTitle;
         surface.BackendName = "MAUI";
-        surface.SurfacePointerPressed += OnSurfacePointerPressed;
-        surface.SurfaceElementDragStarted += OnSurfaceElementDragStarted;
-        surface.SurfaceElementDragDelta += OnSurfaceElementDragDelta;
-        surface.SurfaceElementDragCommitted += OnSurfaceElementDragCommitted;
-        surface.UndoRedoRequested += (_, undo) => { if (undo) Undo(); else Redo(); };
-        surface.SurfaceElementDoubleClicked += OnSurfaceDoubleClicked;
-        surface.ThemeRequested += (_, theme) => _ = SetThemeAsync(theme);
-        surface.DesignSizeSelected += (_, label) =>
+        // What the MAUI host supports: no visual states, no component tray; the theme combo shows
+        // once the host reports its themes (ShowThemes).
+        surface.Capabilities = DesignerCanvasCapabilities.All & ~DesignerCanvasCapabilities.VisualStates
+            & ~DesignerCanvasCapabilities.ComponentTray & ~DesignerCanvasCapabilities.Theme;
+        surface.DesignThemeRequested += (_, theme) => _ = SetThemeAsync(theme);
+        surface.SizePresetRequested += (_, preset) =>
         {
-            if (ParseDesignSize(label) is { } size)
+            if (DesignSizeForPreset(preset) is { } size)
                 _ = SetDesignSizeAsync(size.Width, size.Height);
         };
-        surface.TextEditCommitted += OnTextEditCommitted;
-        surface.ContextCommandRequested += OnSurfaceContextCommand;
+        // Only what the MAUI host supports (it has no z-order or wrap: IDesignHostLayout).
+        surface.SetContextCommands(new[] { ("Cut", "cut"), ("Copy", "copy"), ("Paste", "paste"), ("-", ""), ("Delete", "delete") });
+        // Keyed by DDP id: MAUI pages routinely leave most elements unnamed.
+        canvas = new DesignSurfaceController(surface, this, DesignSurfaceKeying.Id) { ClearsSelectionOnEmptyClick = true };
+        canvas.SelectionChanged += OnCanvasSelectionChanged;
+        canvas.ElementPicked += (_, id) => { if (!selection.Contains(id)) Select(new[] { id }); };
+        canvas.ElementDragCommitted += OnCanvasElementDragCommitted;
+        canvas.ElementGroupDragCommitted += OnCanvasElementGroupDragCommitted;
+        canvas.ElementDoubleClicked += (_, info) => { if (info != null) BeginTextEditFor(info.Name); };
+        canvas.TextEditCommitted += OnTextEditCommitted;
+        canvas.UndoRedoRequested += (_, undo) => { if (undo) Undo(); else Redo(); };
+        canvas.ContextCommandRequested += OnSurfaceContextCommand;
         surface.KeyDown += OnSurfaceKeyDown;
         surface.AllowDrop = true;
         surface.DragOver += OnSurfaceDragOver;
@@ -113,7 +122,7 @@ public sealed class MauiDesignerViewContent : AbstractViewContentHandlingLoadErr
     }
 
     /// <summary>The shared design canvas. Public for DevFlow and tests.</summary>
-    public MauiDesignCanvas Surface => surface;
+    public DesignSurface Surface => surface;
 
     /// <summary>The last session state the child returned, or null before the first open.</summary>
     public DesignerSessionState? SessionState { get; private set; }
@@ -327,10 +336,9 @@ public sealed class MauiDesignerViewContent : AbstractViewContentHandlingLoadErr
             return;
         }
 
-        if (state.Render != null && !string.IsNullOrEmpty(state.Render.Data))
-            surface.SetRender(state.Render);
+        canvas.ApplySnapshot(state);
         if (client is IDesignHostTheme)
-            surface.ShowThemes(state.DesignThemes);
+            ShowThemes(state.DesignThemes);
         Index(state.Tree);
         syncingOutline = true;
         try
@@ -509,21 +517,34 @@ public sealed class MauiDesignerViewContent : AbstractViewContentHandlingLoadErr
 
     void RefreshSelection()
     {
+        // The canvas draws the overlay (outline, handles, secondary outlines); this class keeps the
+        // selection that drives the pads.
+        syncingCanvas = true;
+        try
+        {
+            if (selection.Count == 0)
+            {
+                canvas.ClearSelection();
+                surface.SetSecondarySelection(Array.Empty<(string, double, double, double, double)>());
+            }
+            else
+            {
+                canvas.SelectElements(selection);
+                canvas.ShowSelection(selection[0]);
+            }
+        }
+        finally
+        {
+            syncingCanvas = false;
+        }
+
         if (selection.Count == 0 || !nodesById.TryGetValue(selection[0], out var primary))
         {
-            surface.ClearSelection();
-            surface.SetSecondarySelection(Array.Empty<(string, double, double, double, double)>());
             propertyContainer.SelectedObject = null;
             SyncOutline(null);
             return;
         }
 
-        surface.ShowSelection(primary.X, primary.Y, primary.Width, primary.Height, Label(primary));
-        surface.SetSecondarySelection(selection.Skip(1)
-            .Where(nodesById.ContainsKey)
-            .Select(id => nodesById[id])
-            .Select(node => (node.Id, node.X, node.Y, node.Width, node.Height))
-            .ToList());
         var adapters = selection.Where(nodesById.ContainsKey)
             .Select(id => new MauiElementPropertyAdapter(nodesById[id], SetPropertyBlocking, SetEventBlocking))
             .ToArray();
@@ -533,8 +554,36 @@ public sealed class MauiDesignerViewContent : AbstractViewContentHandlingLoadErr
         SyncOutline(primary.Id);
     }
 
-    static string Label(DesignerElementNode node) =>
-        string.IsNullOrEmpty(node.Name) ? node.Type : node.Name + " (" + node.Type + ")";
+    /// <summary>A selection made on the canvas (click, Ctrl-click, empty-space click, drag start).</summary>
+    void OnCanvasSelectionChanged(object? sender, IReadOnlyList<string> ids)
+    {
+        if (syncingCanvas)
+            return;
+        Select(ids);
+    }
+
+    /// <summary>Shows the theme combo with the host's themes (hidden while it reports none): the
+    /// capability follows what the host actually offers.</summary>
+    void ShowThemes(IReadOnlyList<string> themes)
+    {
+        var offered = themes.Count > 0;
+        if (offered == surface.Capabilities.HasFlag(DesignerCanvasCapabilities.Theme))
+            return;
+        surface.Capabilities = offered
+            ? surface.Capabilities | DesignerCanvasCapabilities.Theme
+            : surface.Capabilities & ~DesignerCanvasCapabilities.Theme;
+        if (offered)
+            surface.SetDesignThemes(themes);
+    }
+
+    /// <summary>The canvas's design-size presets as MAUI device sizes.</summary>
+    static (double Width, double Height)? DesignSizeForPreset(string preset) => preset switch
+    {
+        "phone" => (390, 844),
+        "tablet" => (768, 1024),
+        "desktop" => (1280, 720),
+        _ => null,
+    };
 
     void SyncOutline(string? id)
     {
@@ -561,14 +610,9 @@ public sealed class MauiDesignerViewContent : AbstractViewContentHandlingLoadErr
         Select(new[] { node.Id });
     }
 
-    async void OnSurfacePointerPressed(object? sender, (Vector2 Point, bool Ctrl) press)
-    {
-        var design = surface.ToDesignPoint(new Point(press.Point.X, press.Point.Y));
-        await ClickAtDesignPointAsync(design.X, design.Y, press.Ctrl);
-    }
-
-    /// <summary>A click on the design surface at a design-unit point: hit-test in the child, then
-    /// select (Ctrl toggles within a multi-selection). The surface's own click and DevFlow share this.</summary>
+    /// <summary>A click at a design-unit point, as DevFlow drives it: hit-test in the child, then
+    /// select (Ctrl toggles within a multi-selection). A real click takes the canvas's path
+    /// (<see cref="HitTest"/> and its SelectionChanged), which ends in the same <see cref="Select"/>.</summary>
     public async Task ClickAtDesignPointAsync(double x, double y, bool ctrl)
     {
         var id = await HitTestAsync(new Vector2((float)x, (float)y));
@@ -596,11 +640,6 @@ public sealed class MauiDesignerViewContent : AbstractViewContentHandlingLoadErr
     // Inline text edit in progress: the element and the property being edited.
     string? textEditId;
 
-    async void OnSurfaceDoubleClicked(object? sender, Vector2 point)
-    {
-        var design = surface.ToDesignPoint(new Point(point.X, point.Y));
-        await BeginTextEditAtAsync(design.X, design.Y);
-    }
 
     /// <summary>
     /// Double-click: select the element under the point and, when it has a Text property, edit it
@@ -611,8 +650,16 @@ public sealed class MauiDesignerViewContent : AbstractViewContentHandlingLoadErr
     {
         await ClickAtDesignPointAsync(x, y, ctrl: false);
         await UiThread.Switch();
-        if (SelectedElementId is not { } id || !nodesById.TryGetValue(id, out var node))
+        return SelectedElementId is { } id ? BeginTextEditFor(id) : null;
+    }
+
+    /// <summary>Edits <paramref name="id"/>'s Text in place, when it has a literal one.</summary>
+    string? BeginTextEditFor(string id)
+    {
+        if (!nodesById.TryGetValue(id, out var node))
             return null;
+        if (!selection.Contains(id))
+            Select(new[] { id });
         var text = node.Properties.FirstOrDefault(p => p.Name == TextProperty);
         if (text == null || text.Kind == "Xaml")
             return null; // no Text property, or bound ({Binding ...}): not a literal to edit in place
@@ -692,6 +739,30 @@ public sealed class MauiDesignerViewContent : AbstractViewContentHandlingLoadErr
     /// <summary>The Document Outline pad's selected node, for checking both pads agree.</summary>
     public string? OutlineSelectedId => outline.SelectedNode?.Id;
 
+    /// <summary>
+    /// IDesignCanvasBackend: the child's hit test at a design point, for a click on the canvas.
+    /// The canvas calls this on the UI thread, so the request runs on the pool and is abandoned
+    /// after 2 s rather than freezing the IDE on an unresponsive child.
+    /// </summary>
+    public DesignCanvasHit? HitTest(double x, double y)
+    {
+        if (client is not IDesignHostHitTesting hitTesting || SessionState is not { } state)
+            return null;
+        try
+        {
+            var pending = Task.Run(() => hitTesting.HitTestAsync(state.Version, x, y));
+            if (!pending.Wait(TimeSpan.FromSeconds(2)))
+                return null;
+            var hit = pending.Result;
+            return new DesignCanvasHit(hit.Hit, hit.PickPath, hit.Chain);
+        }
+        catch (Exception exception)
+        {
+            Report("Hit test failed: " + exception.GetBaseException().Message);
+            return null;
+        }
+    }
+
     /// <summary>The element under a design point, as the CHILD sees it (its real layout).</summary>
     async Task<string?> HitTestAsync(Vector2 design)
     {
@@ -716,37 +787,24 @@ public sealed class MauiDesignerViewContent : AbstractViewContentHandlingLoadErr
 
     #region Move / resize
 
-    void OnSurfaceElementDragStarted(object? sender, (string Name, string Handle) info)
+    /// <summary>A move or resize the canvas committed (it tracked the gesture, snapping included).</summary>
+    async void OnCanvasElementDragCommitted(object? sender, ElementDragInfo drag)
     {
-        // The surface echoes back the label; the selection is the source of truth.
-        dragId = SelectedElementId;
-        if (dragId == null || !nodesById.TryGetValue(dragId, out var node) || !parents.ContainsKey(dragId))
+        if (!parents.ContainsKey(drag.Name))
+            return; // the page itself does not move
+        await CommitBoundsAsync(drag.Name, drag.EndX, drag.EndY, drag.EndWidth, drag.EndHeight);
+    }
+
+    /// <summary>A multi-selection moved together: each element by the same delta, one edit each.</summary>
+    async void OnCanvasElementGroupDragCommitted(object? sender, IReadOnlyList<(string Name, double DX, double DY)> moves)
+    {
+        foreach (var (id, dx, dy) in moves)
         {
-            dragId = null;
-            return;
+            if (!parents.ContainsKey(id) || !nodesById.TryGetValue(id, out var node))
+                continue;
+            await CommitBoundsAsync(id, node.X + dx, node.Y + dy, node.Width, node.Height);
+            await UiThread.Switch();
         }
-
-        dragHandle = info.Handle ?? "";
-        dragStart = dragCurrent = (node.X, node.Y, node.Width, node.Height);
-    }
-
-    void OnSurfaceElementDragDelta(object? sender, (double DX, double DY) delta)
-    {
-        if (dragId == null || !nodesById.TryGetValue(dragId, out var node))
-            return;
-        var scale = surface.ViewportScale;
-        dragCurrent = ApplyHandle(dragStart, dragHandle, delta.DX / scale, delta.DY / scale);
-        surface.ShowSelection(dragCurrent.X, dragCurrent.Y, dragCurrent.Width, dragCurrent.Height, Label(node));
-    }
-
-    async void OnSurfaceElementDragCommitted(object? sender, (double DX, double DY) delta)
-    {
-        var id = dragId;
-        dragId = null;
-        if (id == null)
-            return;
-        var end = dragCurrent;
-        await CommitBoundsAsync(id, end.X, end.Y, end.Width, end.Height);
     }
 
     /// <summary>
@@ -760,25 +818,6 @@ public sealed class MauiDesignerViewContent : AbstractViewContentHandlingLoadErr
         if (state == null || !state.Accepted)
             RefreshSelection();
         return state;
-    }
-
-    /// <summary>Applies a move/resize delta for the given handle ("" = move), keeping at least 1 unit.</summary>
-    internal static (double X, double Y, double Width, double Height) ApplyHandle(
-        (double X, double Y, double Width, double Height) r, string handle, double dx, double dy)
-    {
-        var (x, y, w, h) = handle switch
-        {
-            "e" => (r.X, r.Y, r.Width + dx, r.Height),
-            "s" => (r.X, r.Y, r.Width, r.Height + dy),
-            "se" => (r.X, r.Y, r.Width + dx, r.Height + dy),
-            "w" => (r.X + dx, r.Y, r.Width - dx, r.Height),
-            "n" => (r.X, r.Y + dy, r.Width, r.Height - dy),
-            "nw" => (r.X + dx, r.Y + dy, r.Width - dx, r.Height - dy),
-            "sw" => (r.X + dx, r.Y, r.Width - dx, r.Height + dy),
-            "ne" => (r.X, r.Y + dy, r.Width + dx, r.Height - dy),
-            _ => (r.X + dx, r.Y + dy, r.Width, r.Height),
-        };
-        return (x, y, Math.Max(1, w), Math.Max(1, h));
     }
 
     #endregion
