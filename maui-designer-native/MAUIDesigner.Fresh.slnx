@@ -1,6 +1,13 @@
-<Solution>
+﻿<Solution>
   <Project Path="MAUIDesigner.Fresh.App/MAUIDesigner.Fresh.App.csproj" />
   <Project Path="MAUIDesigner.Fresh.App.Tests/MAUIDesigner.Fresh.App.Tests.csproj" />
   <Project Path="MAUIDesigner.Fresh.Core.Tests/MAUIDesigner.Fresh.Core.Tests.csproj" />
   <Project Path="MAUIDesigner.Fresh.Core/MAUIDesigner.Fresh.Core.csproj" />
+  <Project Path="MAUIDesigner.Surface/MAUIDesigner.Surface.csproj" />
+  <Project Path="MAUIDesigner.Surface.Tests/MAUIDesigner.Surface.Tests.csproj" />
+  <Project Path="MAUIDesigner.Ddp/MAUIDesigner.Ddp.csproj" />
+  <Project Path="MAUIDesigner.Ddp.Host/MAUIDesigner.Ddp.Host.csproj" />
+  <Project Path="MAUIDesigner.Ddp.Tests/MAUIDesigner.Ddp.Tests.csproj" />
+  <Project Path="MAUIDesigner.Ddp.Host.Tests/MAUIDesigner.Ddp.Host.Tests.csproj" />
+  <Project Path="MAUIDesigner.Host/MAUIDesigner.Host.csproj" />
 </Solution>

@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <OpenDevelopRoot Condition="'$(OpenDevelopRoot)' == ''">$(OPENDEVELOP_ROOT)</OpenDevelopRoot>
+    <OpenDevelopRoot>$([MSBuild]::EnsureTrailingSlash('$(OpenDevelopRoot)'))</OpenDevelopRoot>
+  </PropertyGroup>
+
+  <Target Name="ValidateOpenDevelopRoot" BeforeTargets="ResolveProjectReferences">
+    <Error Condition="!Exists('$(OpenDevelopRoot)src/Main/Designer/Designer.Remote/Designer.Remote.csproj')"
+           Text="Point OpenDevelopRoot (or the OPENDEVELOP_ROOT environment variable) at an OpenDevelop checkout." />
+  </Target>
+
+  <ItemGroup>
+    <ProjectReference Include="$(OpenDevelopRoot)src/Main/Designer/Designer.Remote/Designer.Remote.csproj" Private="false" />
+  </ItemGroup>
+
+</Project>

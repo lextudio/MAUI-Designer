@@ -55,3 +55,4 @@ Thumbs.db
 !extension/src/MauiDesigner.Vsix/
 /extension/src/MauiDesigner.Vsix/LICENSE.txt
 .vs/
+.od-experimental-instance/

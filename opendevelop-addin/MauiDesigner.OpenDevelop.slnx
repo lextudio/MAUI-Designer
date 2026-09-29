@@ -1,0 +1,8 @@
+<Solution>
+  <Project Path="ICSharpCode.MauiDesigner.AddIn/ICSharpCode.MauiDesigner.AddIn.csproj" />
+  <Project Path="ICSharpCode.MauiDesigner.AddIn.Tests/ICSharpCode.MauiDesigner.AddIn.Tests.csproj" />
+  <Project Path="ICSharpCode.MauiDesigner.IntegrationTests/ICSharpCode.MauiDesigner.IntegrationTests.csproj" />
+  <Project Path="MAUIDesigner.Ddp.Client/MAUIDesigner.Ddp.Client.csproj" />
+  <Project Path="MAUIDesigner.Dialect/MAUIDesigner.Dialect.csproj" />
+  <Project Path="MAUIDesigner.Dialect.Tests/MAUIDesigner.Dialect.Tests.csproj" />
+</Solution>

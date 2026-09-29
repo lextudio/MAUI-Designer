@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The native MAUI design child for macOS: a real AppKit app bundle (MAUI Labs backend, not
+       Mac Catalyst). See OPENDEVELOP-ADDIN.md, "Phase 4 spike", for why each setting is here. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0-macos</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <!-- UseMaui=true would demand a MAUI workload (the SDK asks for maui-tizen); the MAUI Labs
+         backend plus the plain Microsoft.Maui.Controls package need only the macos workload. -->
+    <UseMaui>false</UseMaui>
+    <SupportedOSPlatformVersion>14.0</SupportedOSPlatformVersion>
+    <ApplicationId>com.lextudio.mauidesigner.host</ApplicationId>
+    <AssemblyName>MAUIDesigner.Host</AssemblyName>
+    <RootNamespace>MAUIDesigner.Host</RootNamespace>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <OpenDevelopRoot Condition="'$(OpenDevelopRoot)' == ''">$(OPENDEVELOP_ROOT)</OpenDevelopRoot>
+    <OpenDevelopRoot>$([MSBuild]::EnsureTrailingSlash('$(OpenDevelopRoot)'))</OpenDevelopRoot>
+  </PropertyGroup>
+
+  <Target Name="ValidateOpenDevelopRoot" BeforeTargets="ResolveProjectReferences">
+    <Error Condition="!Exists('$(OpenDevelopRoot)src/Main/Designer/Designer.Server/Designer.Server.csproj')"
+           Text="Point OpenDevelopRoot (or the OPENDEVELOP_ROOT environment variable) at an OpenDevelop checkout." />
+  </Target>
+
+  <ItemGroup>
+    <!-- Pinned: the AppKit backend is experimental, so an upgrade is a compatibility test event. -->
+    <PackageReference Include="Microsoft.Maui.Controls" Version="10.0.41" />
+    <PackageReference Include="Microsoft.Maui.Platforms.MacOS" Version="0.1.0-preview.12.26421.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- A spawned child is its own application: it must carry Designer.Remote/Server itself. -->
+    <ProjectReference Include="$(OpenDevelopRoot)src/Main/Designer/Designer.Server/Designer.Server.csproj" />
+    <ProjectReference Include="$(OpenDevelopRoot)src/Main/Designer/Designer.Remote/Designer.Remote.csproj" />
+    <ProjectReference Include="..\MAUIDesigner.Ddp\MAUIDesigner.Ddp.csproj" />
+  </ItemGroup>
+
+</Project>

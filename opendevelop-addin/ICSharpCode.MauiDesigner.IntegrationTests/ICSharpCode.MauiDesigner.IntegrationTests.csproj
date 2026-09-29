@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The MAUI designer addin tested inside a real OpenDevelop, the way CoreWF's
+       WorkflowDesigner.IntegrationTests does it: a parent OpenDevelop (OPENDEVELOP_APP_PATH) opens
+       the addin's own project and runs it; the Addin SDK starts a second OpenDevelop with
+       -addindir:<the addin's bin> -devflow:9302, and the test drives that instance. Nothing is
+       ever deployed into an OpenDevelop tree. Run with `dotnet run`, not `dotnet test` (xunit v3). -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <IsTestProject>true</IsTestProject>
+    <IsPackable>false</IsPackable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <OpenDevelopRoot Condition="'$(OpenDevelopRoot)' == ''">$(OPENDEVELOP_ROOT)</OpenDevelopRoot>
+    <OpenDevelopRoot>$([MSBuild]::EnsureTrailingSlash('$(OpenDevelopRoot)'))</OpenDevelopRoot>
+  </PropertyGroup>
+
+  <Target Name="ValidateOpenDevelopRoot" BeforeTargets="CoreCompile">
+    <Error Condition="!Exists('$(OpenDevelopRoot)tests/OpenDevelop.IntegrationTests/OpenDevelopAppFixture.cs')"
+           Text="Point OpenDevelopRoot (or the OPENDEVELOP_ROOT environment variable) at an OpenDevelop checkout." />
+  </Target>
+
+  <ItemGroup>
+    <PackageReference Include="xunit.v3" Version="3.2.1" />
+    <!-- OpenDevelop's own fixture: launch, DevFlow client, solution/project helpers. -->
+    <Compile Include="$(OpenDevelopRoot)tests/OpenDevelop.IntegrationTests/OpenDevelopAppFixture.cs" Link="OpenDevelopAppFixture.cs" />
+  </ItemGroup>
+
+</Project>

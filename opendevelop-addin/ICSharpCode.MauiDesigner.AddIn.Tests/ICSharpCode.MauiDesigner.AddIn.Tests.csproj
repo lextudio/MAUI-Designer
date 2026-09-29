@@ -1,0 +1,40 @@
+﻿<Project Sdk="LibreWPF.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <UseWPF>true</UseWPF>
+    <!-- LibreWPF.Sdk, not Microsoft.NET.Sdk + UseWPF: the latter resolves the real
+         Microsoft.WindowsDesktop.App framework reference, which does not exist off Windows, so
+         the test host would abort with "No frameworks were found" on macOS. OpenDevelop's own
+         test projects make the same choice. -->
+    <!-- Referencing the addin pulls OpenDevelop's whole project graph in, including externals that
+         target Windows; without this the test project cannot even restore on macOS. -->
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <!-- Off Windows, WPF renders through ProGPU instead of wpfgfx_cor3; LibreWPF only wires that
+         in when it generates its portable bootstrap, exactly as OpenDevelop's own host does.
+         Without it every test that makes a bitmap or raises a routed event fails with
+         DllNotFoundException 'wpfgfx_cor3.dll' / "non-null RoutedEvent". -->
+    <ProGpuWpfEnablePortableBootstrap Condition="!$([MSBuild]::IsOSPlatform('Windows'))">true</ProGpuWpfEnablePortableBootstrap>
+    <OpenDevelopRoot Condition="'$(OpenDevelopRoot)' == ''">$(OPENDEVELOP_ROOT)</OpenDevelopRoot>
+    <OpenDevelopRoot>$([MSBuild]::EnsureTrailingSlash('$(OpenDevelopRoot)'))</OpenDevelopRoot>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="6.0.4" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ICSharpCode.MauiDesigner.AddIn\ICSharpCode.MauiDesigner.AddIn.csproj" />
+  </ItemGroup>
+
+</Project>

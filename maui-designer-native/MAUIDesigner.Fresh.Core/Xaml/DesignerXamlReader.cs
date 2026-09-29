@@ -1,4 +1,4 @@
-using System.Collections.Immutable;
+﻿using System.Collections.Immutable;
 using System.Globalization;
 using System.Xml;
 using System.Xml.Linq;
@@ -11,8 +11,28 @@ public sealed class DesignerXamlReader
 {
     private const string XamlLanguageNamespace = "http://schemas.microsoft.com/winfx/2009/xaml";
 
-    public XamlReadResult Read(string xaml, IXamlTypeResolver resolver)
+    public XamlReadResult Read(string xaml, IXamlTypeResolver resolver) =>
+        Read(xaml, resolver, sourceMap: null, out _);
+
+    /// <summary>
+    /// Reads like <see cref="Read(string, IXamlTypeResolver)"/> and also returns the parsed source
+    /// (whitespace preserved) with the element each node was read from, keyed by
+    /// <see cref="ElementId.Value"/>. An editor uses it to write edits back into the ORIGINAL text,
+    /// so everything it did not edit - attribute order, whitespace, comments - survives.
+    /// </summary>
+    public XamlReadResult ReadWithSource(string xaml, IXamlTypeResolver resolver,
+        out XDocument? source, out IReadOnlyDictionary<string, XElement> sourceMap)
     {
+        var map = new Dictionary<string, XElement>(StringComparer.Ordinal);
+        XamlReadResult result = Read(xaml, resolver, map, out source);
+        sourceMap = map;
+        return result;
+    }
+
+    private XamlReadResult Read(string xaml, IXamlTypeResolver resolver,
+        Dictionary<string, XElement>? sourceMap, out XDocument? source)
+    {
+        source = null;
         ArgumentException.ThrowIfNullOrWhiteSpace(xaml);
         ArgumentNullException.ThrowIfNull(resolver);
 
@@ -20,6 +40,7 @@ public sealed class DesignerXamlReader
         try
         {
             xml = XDocument.Parse(xaml, LoadOptions.PreserveWhitespace | LoadOptions.SetLineInfo);
+            source = xml;
         }
         catch (XmlException exception)
         {
@@ -46,7 +67,7 @@ public sealed class DesignerXamlReader
         XamlDocumentMetadata? metadata = null;
         if (rootResolution.IsView)
         {
-            visualRoot = ReadNode(root, resolver, diagnostics, ids, ref nextId, null);
+            visualRoot = ReadNode(root, resolver, diagnostics, ids, ref nextId, null, sourceMap);
         }
         else
         {
@@ -57,7 +78,7 @@ public sealed class DesignerXamlReader
                 return new XamlReadResult(null, diagnostics);
             }
 
-            visualRoot = ReadNode(content, resolver, diagnostics, ids, ref nextId, null);
+            visualRoot = ReadNode(content, resolver, diagnostics, ids, ref nextId, null, sourceMap);
             int contentIndex = root.Elements().ToList().FindIndex(element =>
                 element == content || element.Descendants().Contains(content));
             XElement[] wrapperElements = root.Elements().ToArray();
@@ -90,7 +111,8 @@ public sealed class DesignerXamlReader
         List<XamlDiagnostic> diagnostics,
         HashSet<string> ids,
         ref int nextId,
-        string? parentPropertyName)
+        string? parentPropertyName,
+        Dictionary<string, XElement>? sourceMap = null)
     {
         if (!TryResolve(element, resolver, diagnostics, out XamlTypeResolution? resolution) ||
             resolution is null)
@@ -125,7 +147,7 @@ public sealed class DesignerXamlReader
                     continue;
                 }
 
-                AddChildNode(children, child, resolver, diagnostics, ids, ref nextId, null);
+                AddChildNode(children, child, resolver, diagnostics, ids, ref nextId, null, sourceMap);
                 continue;
             }
 
@@ -178,8 +200,14 @@ public sealed class DesignerXamlReader
                     diagnostics,
                     ids,
                     ref nextId,
-                    containsDefaultVisualContent ? null : memberName);
+                    containsDefaultVisualContent ? null : memberName,
+                    sourceMap);
             }
+        }
+
+        if (sourceMap is not null)
+        {
+            sourceMap[id] = element;
         }
 
         RectD? bounds = TryReadAbsoluteBounds(properties, out RectD parsedBounds)
@@ -267,7 +295,8 @@ public sealed class DesignerXamlReader
         List<XamlDiagnostic> diagnostics,
         HashSet<string> ids,
         ref int nextId,
-        string? parentPropertyName)
+        string? parentPropertyName,
+        Dictionary<string, XElement>? sourceMap = null)
     {
         DesignerNode? childNode = ReadNode(
             childElement,
@@ -275,7 +304,8 @@ public sealed class DesignerXamlReader
             diagnostics,
             ids,
             ref nextId,
-            parentPropertyName);
+            parentPropertyName,
+            sourceMap);
         if (childNode is not null)
         {
             children.Add(childNode);

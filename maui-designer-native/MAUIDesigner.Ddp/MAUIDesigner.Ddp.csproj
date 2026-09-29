@@ -1,0 +1,28 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <OpenDevelopRoot Condition="'$(OpenDevelopRoot)' == ''">$(OPENDEVELOP_ROOT)</OpenDevelopRoot>
+    <OpenDevelopRoot>$([MSBuild]::EnsureTrailingSlash('$(OpenDevelopRoot)'))</OpenDevelopRoot>
+  </PropertyGroup>
+
+  <Target Name="ValidateOpenDevelopRoot" BeforeTargets="ResolveProjectReferences">
+    <Error Condition="!Exists('$(OpenDevelopRoot)src/Main/Designer/Designer.Remote/Designer.Remote.csproj')"
+           Text="Point OpenDevelopRoot (or the OPENDEVELOP_ROOT environment variable) at an OpenDevelop checkout, e.g. -p:OpenDevelopRoot=/Users/lextm/wpf-tools/OpenDevelop" />
+  </Target>
+
+  <ItemGroup>
+    <PackageReference Include="StreamJsonRpc" Version="2.25.29" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MAUIDesigner.Fresh.Core\MAUIDesigner.Fresh.Core.csproj" />
+    <ProjectReference Include="$(OpenDevelopRoot)src/Main/Designer/Designer.Remote/Designer.Remote.csproj" Private="false" />
+    <!-- IDesignerChildService lives here, next to DesignerChildHost.Run. Both assemblies are
+         net10.0 and UI-free, so the DDP service stays platform-neutral and testable. -->
+    <ProjectReference Include="$(OpenDevelopRoot)src/Main/Designer/Designer.Server/Designer.Server.csproj" Private="false" />
+  </ItemGroup>
+
+</Project>

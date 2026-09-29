@@ -1,0 +1,13 @@
+﻿<AddIn name="MAUI Designer" author="MAUIDesigner" description="Visual designer for .NET MAUI XAML files." addInManagerHidden="preinstalled">
+  <Manifest><Identity name="ICSharpCode.MauiDesigner" /></Manifest>
+  <Runtime><Import assembly="ICSharpCode.MauiDesigner.dll" /></Runtime>
+  <Path name="/SharpDevelop/Workbench/AutostartAfterWorkbenchInitialized">
+    <!-- Registers the "Maui" dialect and its child host before any document is opened, so the
+         workbench can route MAUI files to this addin without any other designer knowing MAUI. -->
+    <Class id="ICSharpCode.MauiDesigner.RegisterMauiDialect" class="ICSharpCode.MauiDesigner.RegisterMauiDialect" />
+    <Class id="ICSharpCode.MauiDesigner.RegisterMauiDevFlowActionsCommand" class="ICSharpCode.MauiDesigner.RegisterMauiDevFlowActionsCommand" />
+  </Path>
+  <Path name="/SharpDevelop/Workbench/DisplayBindings">
+    <DisplayBinding id="MauiDesigner" type="Secondary" class="ICSharpCode.MauiDesigner.MauiDesignerDisplayBinding" fileNamePattern="\.xaml$" />
+  </Path>
+</AddIn>

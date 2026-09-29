@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <OpenDevelopRoot Condition="'$(OpenDevelopRoot)' == ''">$(OPENDEVELOP_ROOT)</OpenDevelopRoot>
+    <OpenDevelopRoot>$([MSBuild]::EnsureTrailingSlash('$(OpenDevelopRoot)'))</OpenDevelopRoot>
+  </PropertyGroup>
+
+  <Target Name="ValidateOpenDevelopRoot" BeforeTargets="ResolveProjectReferences">
+    <Error Condition="!Exists('$(OpenDevelopRoot)src/Main/Designer/Designer.Server/Designer.Server.csproj')"
+           Text="Point OpenDevelopRoot (or the OPENDEVELOP_ROOT environment variable) at an OpenDevelop checkout." />
+  </Target>
+
+  <ItemGroup>
+    <!-- A spawned child is a separate application, so unlike an in-process addin it cannot
+         borrow ICSharpCode.Designer.Remote/Server from the host: Private must stay true here or
+         the child dies at startup with a FileNotFoundException on its own bootstrap assembly. -->
+    <ProjectReference Include="$(OpenDevelopRoot)src/Main/Designer/Designer.Server/Designer.Server.csproj" />
+    <ProjectReference Include="..\MAUIDesigner.Ddp\MAUIDesigner.Ddp.csproj" />
+  </ItemGroup>
+
+</Project>
