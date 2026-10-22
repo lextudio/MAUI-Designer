@@ -32,7 +32,7 @@ namespace ICSharpCode.MauiDesigner;
 /// most elements unnamed.
 /// </para>
 /// </summary>
-public sealed class MauiDesignerViewContent : AbstractViewContentHandlingLoadErrors, IDesignCanvasBackend,
+public sealed class MauiDesignerViewContent : AbstractViewContentHandlingLoadErrors,
     IOutlineContentHost, IToolsHost, IHasPropertyContainer, IUndoHandler, IClipboardHandler
 {
     public const string TabTitle = "Design";
@@ -105,7 +105,9 @@ public sealed class MauiDesignerViewContent : AbstractViewContentHandlingLoadErr
         // Only what the MAUI host supports (it has no z-order or wrap: IDesignHostLayout).
         surface.SetContextCommands(new[] { ("Cut", "cut"), ("Copy", "copy"), ("Paste", "paste"), ("-", ""), ("Delete", "delete") });
         // Keyed by DDP id: MAUI pages routinely leave most elements unnamed.
-        canvas = new DesignSurfaceController(surface, this, DesignSurfaceKeying.Id) { ClearsSelectionOnEmptyClick = true };
+        // The canvas resolves hits from the last snapshot itself (DesignerSnapshotHitTester); the
+        // backend no longer supplies IDesignCanvasBackend.HitTest (removed in f191e4c564).
+        canvas = new DesignSurfaceController(surface, DesignSurfaceKeying.Id) { ClearsSelectionOnEmptyClick = true };
         canvas.SelectionChanged += OnCanvasSelectionChanged;
         canvas.ElementPicked += (_, id) => { if (!selection.Contains(id)) Select(new[] { id }); };
         canvas.ElementDragCommitted += OnCanvasElementDragCommitted;
@@ -684,7 +686,7 @@ public sealed class MauiDesignerViewContent : AbstractViewContentHandlingLoadErr
             return null;
         try
         {
-            var operation = theming.SetThemeAsync(theme);
+            var operation = theming.SetThemeAsync(SessionState.Version, theme);
             Loaded = operation;
             var state = await operation;
             await UiThread.Switch();
@@ -738,30 +740,6 @@ public sealed class MauiDesignerViewContent : AbstractViewContentHandlingLoadErr
 
     /// <summary>The Document Outline pad's selected node, for checking both pads agree.</summary>
     public string? OutlineSelectedId => outline.SelectedNode?.Id;
-
-    /// <summary>
-    /// IDesignCanvasBackend: the child's hit test at a design point, for a click on the canvas.
-    /// The canvas calls this on the UI thread, so the request runs on the pool and is abandoned
-    /// after 2 s rather than freezing the IDE on an unresponsive child.
-    /// </summary>
-    public DesignCanvasHit? HitTest(double x, double y)
-    {
-        if (client is not IDesignHostHitTesting hitTesting || SessionState is not { } state)
-            return null;
-        try
-        {
-            var pending = Task.Run(() => hitTesting.HitTestAsync(state.Version, x, y));
-            if (!pending.Wait(TimeSpan.FromSeconds(2)))
-                return null;
-            var hit = pending.Result;
-            return new DesignCanvasHit(hit.Hit, hit.PickPath, hit.Chain);
-        }
-        catch (Exception exception)
-        {
-            Report("Hit test failed: " + exception.GetBaseException().Message);
-            return null;
-        }
-    }
 
     /// <summary>The element under a design point, as the CHILD sees it (its real layout).</summary>
     async Task<string?> HitTestAsync(Vector2 design)

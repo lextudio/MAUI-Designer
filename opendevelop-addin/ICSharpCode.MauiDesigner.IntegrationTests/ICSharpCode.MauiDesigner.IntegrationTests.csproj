@@ -25,6 +25,9 @@
     <PackageReference Include="xunit.v3" Version="3.2.1" />
     <!-- OpenDevelop's own fixture: launch, DevFlow client, solution/project helpers. -->
     <Compile Include="$(OpenDevelopRoot)tests/OpenDevelop.IntegrationTests/OpenDevelopAppFixture.cs" Link="OpenDevelopAppFixture.cs" />
+    <!-- The fixture's public members are typed by RuntimeCell; the OpenDevelop test project gets it
+         from a sibling file, so an external project that links only the fixture must link this too. -->
+    <Compile Include="$(OpenDevelopRoot)tests/OpenDevelop.IntegrationTests/RuntimeCell.cs" Link="RuntimeCell.cs" />
   </ItemGroup>
 
 </Project>

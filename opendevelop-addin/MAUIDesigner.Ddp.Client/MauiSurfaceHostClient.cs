@@ -64,11 +64,11 @@ public sealed class MauiSurfaceHostClient : IDesignHostClient,
         return new MauiSurfaceHostClient(connection, documentId);
     }
 
-    public Task<DesignerSessionState> OpenAsync(DesignerDocumentSnapshot snapshot, CancellationToken cancellationToken = default) =>
-        document.OpenAsync(snapshot, cancellationToken);
+    public Task<DesignerSessionState> OpenAsync(DesignerDocumentSnapshot snapshot, CancellationToken cancellationToken = default, DesignerViewport? viewport = null) =>
+        document.OpenAsync(snapshot, viewport, cancellationToken);
 
-    public Task<DesignerSessionState> UpdateAsync(DesignerDocumentSnapshot snapshot, CancellationToken cancellationToken = default) =>
-        document.UpdateAsync(snapshot, cancellationToken);
+    public Task<DesignerSessionState> UpdateAsync(DesignerDocumentSnapshot snapshot, CancellationToken cancellationToken = default, DesignerViewport? viewport = null) =>
+        document.UpdateAsync(snapshot, viewport, cancellationToken);
 
     public Task<DesignerEditSet> FlushAsync(long baseVersion, CancellationToken cancellationToken = default) =>
         document.FlushAsync(baseVersion, cancellationToken);
@@ -79,8 +79,8 @@ public sealed class MauiSurfaceHostClient : IDesignHostClient,
     public Task<DesignerSessionState> SetEventAsync(long baseVersion, string elementId, string eventName, string handlerName, CancellationToken cancellationToken = default) =>
         document.SetEventAsync(baseVersion, elementId, eventName, handlerName, cancellationToken);
 
-    public Task<DesignerSessionState> AddElementAsync(long baseVersion, string parentId, DesignerToolboxItemInfo item, string proposedName, double x, double y, CancellationToken cancellationToken = default) =>
-        document.AddElementAsync(baseVersion, parentId, item, proposedName, x, y, cancellationToken);
+    public Task<DesignerSessionState> AddElementAsync(long baseVersion, string parentId, DesignerToolboxItemInfo item, string proposedName, double x, double y, DesignerDropTarget? dropTarget = null, CancellationToken cancellationToken = default) =>
+        document.AddElementAsync(baseVersion, parentId, item, proposedName, x, y, dropTarget!, cancellationToken);
 
     public Task<DesignerSessionState> SetBoundsAsync(long baseVersion, string elementId, double x, double y, double width, double height, CancellationToken cancellationToken = default) =>
         document.SetBoundsAsync(baseVersion, elementId, x, y, width, height, cancellationToken);
@@ -98,8 +98,8 @@ public sealed class MauiSurfaceHostClient : IDesignHostClient,
         MutateAsync("design/reset-property", new { baseVersion, elementId, propertyName }, cancellationToken);
 
     /// <summary>The shared IDesignHostTheme contract, wire shape as the WPF host (design/theme).</summary>
-    public Task<DesignerSessionState> SetThemeAsync(string theme, CancellationToken cancellationToken = default) =>
-        MutateAsync("design/theme", new { baseVersion = 0L, theme }, cancellationToken);
+    public Task<DesignerSessionState> SetThemeAsync(long baseVersion, string theme, CancellationToken cancellationToken = default) =>
+        MutateAsync("design/theme", new { baseVersion, theme }, cancellationToken);
 
     public Task<DesignerSessionState> SetDesignSizeAsync(long baseVersion, double width, double height, CancellationToken cancellationToken = default) =>
         MutateAsync("design/set-design-size", new { baseVersion, width, height }, cancellationToken);

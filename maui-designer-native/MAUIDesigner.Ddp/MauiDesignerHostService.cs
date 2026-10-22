@@ -96,9 +96,13 @@ public sealed class MauiDesignerHostService : IDesignerChildService
         _ => "Controls",
     };
 
+    // Since DesignerProtocol v3 (OpenDevelop d25ca8ee7c) the common client sends the snapshot and
+    // an optional presenter viewport together as session/open|update's single "request" argument.
+    // The MAUI surface lays itself out, so the viewport is not consumed here.
     [JsonRpcMethod("session/open")]
-    public DesignerSessionState Open(DesignerDocumentSnapshot snapshot)
+    public DesignerSessionState Open(DesignerDocumentRequest request)
     {
+        DesignerDocumentSnapshot snapshot = request.Snapshot;
         ArgumentNullException.ThrowIfNull(snapshot);
 
         _sessionId = snapshot.SessionId;
@@ -143,7 +147,7 @@ public sealed class MauiDesignerHostService : IDesignerChildService
         ?? new DesignerXamlWriter().Write(document);
 
     [JsonRpcMethod("session/update")]
-    public DesignerSessionState Update(DesignerDocumentSnapshot snapshot) => Open(snapshot);
+    public DesignerSessionState Update(DesignerDocumentRequest request) => Open(request);
 
     [JsonRpcMethod("session/flush")]
     public DesignerEditSet Flush(string sessionId, string documentId, long baseVersion)
@@ -275,7 +279,11 @@ public sealed class MauiDesignerHostService : IDesignerChildService
         DesignerToolboxItemInfo item,
         string proposedName,
         double x,
-        double y)
+        double y,
+        // Since DesignerProtocol v3 the common client always sends the resolved drop target. A MAUI
+        // layout container's XAML structure is authoritative and insertion always appends, so the
+        // hint is accepted for arity and not otherwise consumed.
+        DesignerDropTarget? dropTarget = null)
     {
         DocumentSession session = Require(sessionId, documentId);
         ArgumentNullException.ThrowIfNull(item);
