@@ -56,3 +56,7 @@ Thumbs.db
 /extension/src/MauiDesigner.Vsix/LICENSE.txt
 .vs/
 .od-experimental-instance/
+
+# Project-local OpenDevelop caches (Roslyn reference/solution snapshots) written next to a
+# project when the IDE opens it during development or an integration run.
+.od/
