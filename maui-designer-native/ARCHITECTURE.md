@@ -17,6 +17,8 @@
 | `MAUIDesigner.Fresh.Core` | Document tree, commands, history, geometry, drop-target resolution, and extension contracts that do not depend on MAUI |
 | `MAUIDesigner.Fresh.App` | MAUI catalog, real-control materialization, shell, canvas/adorners, property editors, layout adapters, and XAML workspace |
 | `MAUIDesigner.Fresh.Core.Tests` | Deterministic mutation, parenting, geometry, and history tests |
+| `MAUIDesigner.Host` | Native rendering child for macOS: AppKit, out-of-process DDP child; UI-free DDP service below it |
+| `MAUIDesigner.Host.iOS` | Native rendering child for the iOS Simulator; a UIKit `net10.0-ios` app, launched in the sim by the addin via `xcrun simctl` |
 
 The app targets .NET 10 and enables the experimental `Microsoft.Maui.DevFlow.Agent` only in Debug builds. DevFlow supplies visual-tree inspection, screenshots, interactions, layout diagnostics, and profiling for repeatable native validation; it is not part of the designer runtime architecture or release build.
 

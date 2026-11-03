@@ -8,4 +8,5 @@
   <Project Path="MAUIDesigner.Ddp.Tests/MAUIDesigner.Ddp.Tests.csproj" />
   <Project Path="MAUIDesigner.Ddp.Host.Tests/MAUIDesigner.Ddp.Host.Tests.csproj" />
   <Project Path="MAUIDesigner.Host/MAUIDesigner.Host.csproj" />
+  <Project Path="MAUIDesigner.Host.iOS/MAUIDesigner.Host.iOS.csproj" />
 </Solution>

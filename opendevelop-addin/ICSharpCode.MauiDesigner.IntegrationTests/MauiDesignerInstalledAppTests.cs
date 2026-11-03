@@ -116,6 +116,84 @@ public sealed class MauiDesignerInstalledAppTests
     static void AssertOk(JsonElement result, string step) =>
         Assert.True(result.TryGetProperty("success", out var ok) && ok.GetBoolean(), $"{step}: {result}");
 
+    static bool IosSimulatorAvailable()
+    {
+        if (!OperatingSystem.IsMacOS())
+            return false;
+        try
+        {
+            var startInfo = new System.Diagnostics.ProcessStartInfo("/usr/bin/xcrun",
+                "simctl list devices available -j")
+            {
+                RedirectStandardOutput = true,
+                UseShellExecute = false,
+            };
+            using var process = System.Diagnostics.Process.Start(startInfo);
+            string output = process?.StandardOutput.ReadToEnd() ?? "";
+            process?.WaitForExit();
+            return output.Contains("\"iPhone", StringComparison.Ordinal) && process?.ExitCode == 0;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    static void SkipUnlessIosRunnable()
+    {
+        SkipUnlessRunnable();
+        if (!IosSimulatorAvailable())
+            Assert.Skip("No iPhone simulator is available (xcrun simctl list devices available).");
+    }
+
+    [Fact]
+    public async Task MauiPage_SwitchesToIosSimulator_AndBack()
+    {
+        SkipUnlessIosRunnable();
+        using var child = await StartAddinHostAsync();
+        var directory = Path.Combine(Path.GetTempPath(), "opendevelop-maui-ios-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        var projectPath = Path.Combine(directory, "MauiIosJourney.csproj");
+        var pagePath = Path.Combine(directory, "MainPage.xaml");
+        File.WriteAllText(projectPath, "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework><UseMaui>true</UseMaui></PropertyGroup></Project>");
+        File.WriteAllText(pagePath, PageXaml);
+        try
+        {
+            AssertOk(await child.InvokeAsync("od.open-solution", projectPath), "open solution");
+            Assert.True((await child.InvokeAsync("od.open-file", pagePath)).GetProperty("opened").GetBoolean());
+            AssertOk(await child.InvokeAsync("od.activate-secondary-view", pagePath, ViewType), "activate MAUI design view");
+
+            var status = await child.InvokeAsync("od.maui-designer.status");
+            AssertOk(status, "open");
+            Assert.True(status.GetProperty("surface").GetProperty("hasRender").GetBoolean(), status.ToString());
+            Assert.Equal("mac", status.GetProperty("designTarget").GetString());
+
+            // Switch to the UIKit child: the same document, rendered in the iOS Simulator by the
+            // real iOS handlers (390x844 design units at the screen scale).
+            var ios = await child.InvokeAsync("od.maui-designer.target", "ios");
+            AssertOk(ios, "switch to iOS");
+            Assert.Equal("ios", ios.GetProperty("designTarget").GetString());
+            Assert.True(ios.GetProperty("surface").GetProperty("hasRender").GetBoolean(), ios.ToString());
+            var iosFrame = ios.GetProperty("frame");
+            Assert.Equal(390, iosFrame.GetProperty("Width").GetInt32() / iosFrame.GetProperty("Dpi").GetDouble(), 0);
+            Assert.True(iosFrame.GetProperty("Dpi").GetDouble() >= 2.0, ios.ToString());
+            var iosTree = ios.GetProperty("tree");
+            var iosTitle = Bounds(Node(iosTree, "Title"));
+            var iosGo = Bounds(Node(iosTree, "Go"));
+            Assert.True(iosTitle.W > 0 && iosTitle.H > 0 && iosGo.W > 0 && iosGo.H > 0, ios.ToString());
+
+            // Back to macOS: the AppKit child reopens the same document (nothing was lost).
+            var mac = await child.InvokeAsync("od.maui-designer.target", "macos");
+            AssertOk(mac, "switch back to macOS");
+            Assert.Equal("mac", mac.GetProperty("designTarget").GetString());
+            Assert.True(mac.GetProperty("surface").GetProperty("hasRender").GetBoolean(), mac.ToString());
+        }
+        finally
+        {
+            try { Directory.Delete(directory, recursive: true); } catch (Exception) { }
+        }
+    }
+
     [Fact]
     public async Task MauiPage_SelectEditInsertMoveUndoDeleteAndSave_ThroughTheDesigner()
     {

@@ -29,6 +29,25 @@ existing WinUI implementation, and macOS uses the MAUI Labs AppKit implementatio
 document model, DDP service/client, geometry, XAML round trip, and their tests remain below
 both hosts at `net10.0`.
 
+### 2a-bis. iOS Simulator host (2026-11-03)
+
+A third native child joined the same DDP seam: `maui-designer-native/MAUIDesigner.Host.iOS/`,
+a `net10.0-ios` UIKit app (`UseMaui=false`, assemblies from NuGet like the macOS host), rendered by
+the official iOS handlers. The addin launches it in the **iOS Simulator**, not as a plain child:
+`xcrun simctl bootstatus <udid> -b`, `simctl install`, then
+`simctl launch --console --terminate-running-process <udid> <bundleId> --port N --token T`.
+simctl stays alive for the app's lifetime and carries its stdout/stderr into the redirected pipes
+of the spawned process, so the existing `DesignerHostProcessClient` lifecycle (pump, exit, shutdown)
+works unchanged except for the handshake: the app's pid is not simctl's pid, so
+`IosSimulatorConnection.OnConnectedAsync` validates protocol version and session id only; the token
+is the proof of identity. The simulator shares the Mac's loopback stack, so the child connects back
+to the IDE exactly like the macOS child (verified on-machine: the app opened a TCP connection to a
+127.0.0.1 listener from inside the sim).
+
+Per document view the target is chosen with one toolbar combo: **Design host: macOS (AppKit) /
+iOS Simulator**; `od.maui-designer.target` does the same from DevFlow. `MAUIDESIGNER_IOS_UDID`
+pins the simulator device (default: a booted iPhone, else the newest available iPhone).
+
 ### 2a. Cross-platform host plan (2026-09-28)
 
 The initial implementation was deliberately split at DDP so the difficult protocol work could
@@ -362,7 +381,9 @@ Each phase ends with something verifiable. See the progress log in §9.
       `Microsoft.Maui.Platforms.MacOS` / `MacOSMauiApplication` and supplies an AppKit adapter.
       The first milestone is open XAML → render a real MAUI frame → hit test, on each OS.
       **macOS milestone reached 2026-09-28** (open → real frame → real layout → hit test → edit
-      re-render, end to end over loopback JSON-RPC and live in OpenDevelop). Windows host not started.
+      re-render, end to end over loopback JSON-RPC and live in OpenDevelop). **iOS phase 4c landed
+      2026-11-03**: the UIKit child in the iOS Simulator renders the same document, selected per
+      document view (Windows host not started).
 - [ ] **Phase 5 — addin lifecycle and interaction.** *Lifecycle half done (2026-09-28):*
       child start from `Host/`, open/update per load, flush-on-save, shutdown on dispose.
       Interaction (intent routing, hit-test/select/mutation) still to do. Replace the placeholder
@@ -388,6 +409,7 @@ dotnet test maui-designer-native/MAUIDesigner.Dialect.Tests/MAUIDesigner.Dialect
 dotnet test maui-designer-native/MAUIDesigner.Ddp.Tests/MAUIDesigner.Ddp.Tests.csproj
 dotnet test maui-designer-native/MAUIDesigner.Ddp.Host.Tests/MAUIDesigner.Ddp.Host.Tests.csproj   # spawns the real children
 dotnet build maui-designer-native/ICSharpCode.MauiDesigner.AddIn/ICSharpCode.MauiDesigner.AddIn.csproj
+dotnet build maui-designer-native/MAUIDesigner.Host.iOS/MAUIDesigner.Host.iOS.csproj -c Debug -r iossimulator-arm64
 ```
 
 The addin builds into **its own** `ICSharpCode.MauiDesigner.AddIn/bin/<Configuration>/` (with the
@@ -416,6 +438,29 @@ The addin project needs `SDKROOT` pointed at a real SDK on this machine (the CLT
 linker otherwise fails).
 
 ## 9. Progress log
+
+### 2026-11-03 — iOS Simulator child lands
+
+- **Implemented** `MAUIDesigner.Host.iOS` (`net10.0-ios`, `UseMaui=false`, official iOS handlers):
+  `Program.cs` (UIApplication bootstrap; argv read from NSProcessInfo because simctl passes launch
+  arguments there, not to `Main`), `UIKitMauiRenderer` (offscreen `UIWindow` per design-size change,
+  `CGBitmapContext` readback, same BGRA32 path as the macOS host), and a linked copy of
+  `MauiReflectionTypeCatalog`. The page is also visible in the simulator — the preview is the live
+  device-shaped UI.
+- **Implemented** the addin half: `MauiIosSimulatorSurfaceHostClient` (boot/install/launch +
+  handshake tolerant of the pid pairing), `HostPanel()` toolbar in the view content ("Design host:
+  macOS (AppKit)" / "iOS Simulator"), `od.maui-designer.target` DevFlow action, bundling of the
+  101 MB debug `MAUIDesigner.Host.iOS.app` into `Host/` at addin build time, and an opt-in
+  integration test (`MauiPage_SwitchesToIosSimulator_AndBack`) that boots the sim, switches the same
+  document across hosts, and asserts a non-empty iOS frame before switching back. Green: 1/1.
+- **Verified end to end** on this machine (OpenDevelop MASTER): macOS child renders; `od.maui-designer.target ios`
+  reopens the same document in the simulator with iOS handlers and a real frame; switching back
+  restores the macOS child with the document intact. `od.maui-designer.status` now reports
+  `designTarget`.
+- Notes: the iOS workload refuses Xcode 27 here for the same reason as macOS — build with
+  `-p:ValidateXcodeVersion=false` (wired into the csproj). iOS tap input in the simulator is **not**
+  forwarded to the designer (hit-testing stays editor-side, as on macOS). The simulator window shows
+  the page; it is informational.
 
 ### 2026-09-28
 

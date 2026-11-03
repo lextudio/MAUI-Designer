@@ -61,6 +61,7 @@
     <_MauiRid>osx-$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString().ToLowerInvariant())</_MauiRid>
     <MauiModelHostOutput Condition="'$(MauiModelHostOutput)' == ''">$(MauiDesignHostRoot)MAUIDesigner.Ddp.Host/bin/$(Configuration)/net10.0/</MauiModelHostOutput>
     <MauiNativeMacHostBundle Condition="'$(MauiNativeMacHostBundle)' == ''">$(MauiDesignHostRoot)MAUIDesigner.Host/bin/$(Configuration)/net10.0-macos/$(_MauiRid)/MAUIDesigner.Host.app</MauiNativeMacHostBundle>
+    <MauiNativeIosHostBundle Condition="'$(MauiNativeIosHostBundle)' == ''">$(MauiDesignHostRoot)MAUIDesigner.Host.iOS/bin/$(Configuration)/net10.0-ios/iossimulator-arm64/MAUIDesigner.Host.iOS.app</MauiNativeIosHostBundle>
   </PropertyGroup>
 
   <!-- The MAUI XAML language server (maui-xaml-ls), bundled next to the addin under LanguageServer/
@@ -91,6 +92,12 @@
     <RemoveDir Condition="$([MSBuild]::IsOSPlatform('OSX')) And Exists('$(MauiNativeMacHostBundle)')" Directories="$(OutputPath)Host/MAUIDesigner.Host.app" />
     <Exec Condition="$([MSBuild]::IsOSPlatform('OSX')) And Exists('$(MauiNativeMacHostBundle)')"
           Command="ditto &quot;$(MauiNativeMacHostBundle)&quot; &quot;$(OutputPath)Host/MAUIDesigner.Host.app&quot;" />
+    <Warning Condition="$([MSBuild]::IsOSPlatform('OSX')) And !Exists('$(MauiNativeIosHostBundle)')"
+             Text="The native iOS MAUI design host is not built ($(MauiNativeIosHostBundle)); build ../maui-designer-native/MAUIDesigner.Host.iOS first to bundle it." />
+    <!-- An iOS simulator app bundle is unsigned by design; install straight from the copied folder. -->
+    <RemoveDir Condition="$([MSBuild]::IsOSPlatform('OSX')) And Exists('$(MauiNativeIosHostBundle)')" Directories="$(OutputPath)Host/MAUIDesigner.Host.iOS.app" />
+    <Exec Condition="$([MSBuild]::IsOSPlatform('OSX')) And Exists('$(MauiNativeIosHostBundle)')"
+          Command="ditto &quot;$(MauiNativeIosHostBundle)&quot; &quot;$(OutputPath)Host/MAUIDesigner.Host.iOS.app&quot;" />
   </Target>
 
 

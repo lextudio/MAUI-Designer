@@ -1,6 +1,7 @@
 ﻿using System.IO;
 using System.Numerics;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Input;
 
 using ICSharpCode.Core;
@@ -40,6 +41,9 @@ public sealed class MauiDesignerViewContent : AbstractViewContentHandlingLoadErr
     /// <summary>The native rendering child on macOS: an AppKit app bundle whose executable is
     /// started directly (an AppKit app cannot run under <c>dotnet exec</c>).</summary>
     public const string NativeMacHostExecutable = "MAUIDesigner.Host.app/Contents/MacOS/MAUIDesigner.Host";
+    /// <summary>The native rendering child on iOS: a UIKit app installed and launched in the iOS
+    /// Simulator by this addin via <c>xcrun simctl</c> (see MauiIosSimulatorSurfaceHostClient).</summary>
+    public const string NativeIosHostExecutable = "MAUIDesigner.Host.iOS.app";
     /// <summary>The UI-free DDP child: the document round trip without a frame, used where no
     /// native renderer is deployed (Windows, until its WinUI host exists).</summary>
     public const string ModelHostFileName = "MAUIDesigner.Ddp.Host.dll";
@@ -123,8 +127,56 @@ public sealed class MauiDesignerViewContent : AbstractViewContentHandlingLoadErr
         outline.SelectionCommitted += OnOutlineSelectionCommitted;
     }
 
+    /// <summary>The view's content: the shared design surface with a one-line toolbar atop
+    /// choosing the design host (macOS AppKit vs iOS Simulator). The addin is a LibreWPF/WPF
+    /// library, so the plain Controls are used.</summary>
+    internal System.Windows.FrameworkElement HostPanel()
+    {
+        if (hostPanel != null)
+            return hostPanel;
+
+        var combo = new System.Windows.Controls.ComboBox
+        {
+            Width = 230,
+            Margin = new Thickness(6, 3, 0, 3),
+            SelectedIndex = designTarget == TargetIos ? 1 : 0,
+        };
+        combo.Items.Add("Design host: macOS (AppKit)");
+        combo.Items.Add("Design host: iOS Simulator");
+        combo.SelectionChanged += (_, _) =>
+        {
+            if (syncingTargetCombo)
+                return;
+            _ = SwitchDesignTargetAsync(combo.SelectedIndex == 1 ? TargetIos : TargetMac);
+        };
+        targetCombo = combo;
+
+        var panel = new System.Windows.Controls.DockPanel();
+        System.Windows.Controls.DockPanel.SetDock(combo, Dock.Top);
+        panel.Children.Add(combo);
+        panel.Children.Add(surface);
+        hostPanel = panel;
+        return panel;
+    }
+
     /// <summary>The shared design canvas. Public for DevFlow and tests.</summary>
     public DesignSurface Surface => surface;
+
+    /// <summary>The design host kind the view targets. "mac" = the AppKit child; "ios" = the UIKit
+    /// child in the iOS Simulator. The choice is per document view and not persisted.</summary>
+    public const string TargetMac = "mac";
+
+    /// <summary><see cref="TargetMac"/> / <see cref="TargetIos"/></summary>
+    public const string TargetIos = "ios";
+
+    string designTarget = TargetMac;
+    System.Windows.FrameworkElement? hostPanel;
+    System.Windows.Controls.ComboBox? targetCombo;
+    bool syncingTargetCombo;
+
+    /// <summary>Which design host the view starts. Changing it restarts the child and reopens the
+    /// document in the new host (every accepted edit is preserved).</summary>
+    public string DesignTarget => designTarget;
 
     /// <summary>The last session state the child returned, or null before the first open.</summary>
     public DesignerSessionState? SessionState { get; private set; }
@@ -155,7 +207,7 @@ public sealed class MauiDesignerViewContent : AbstractViewContentHandlingLoadErr
 
     protected override void LoadInternal(OpenedFile file, Stream stream)
     {
-        UserContent = surface;
+        UserContent = HostPanel();
         using (var reader = new StreamReader(stream, leaveOpen: true))
             sourceText = reader.ReadToEnd();
         // Switching back from the source tab reloads the same text: keep the session (selection,
@@ -231,12 +283,26 @@ public sealed class MauiDesignerViewContent : AbstractViewContentHandlingLoadErr
 
     async Task ConnectAsync()
     {
-        var hostDll = LocateHost()
+        var isIos = designTarget == TargetIos;
+        var hostDll = LocateHostFor(designTarget)
             ?? throw new FileNotFoundException(
-                "The MAUI design host is not installed next to the addin (expected Host/"
-                + NativeMacHostExecutable + " or Host/" + ModelHostFileName + ").");
+                isIos
+                    ? "The iOS MAUI design host is not installed next to the addin (expected Host/" + NativeIosHostExecutable + ")."
+                    : "The MAUI design host is not installed next to the addin (expected Host/"
+                        + NativeMacHostExecutable + " or Host/" + ModelHostFileName + ").");
         Report("Starting design host " + hostDll);
-        var started = await MauiSurfaceHostClient.StartAsync(hostDll, PrimaryFileName.ToString());
+        IDesignHostClient started;
+        if (isIos)
+        {
+            // The child never spawns directly: the client installs and launches it in the
+            // simulator and the connection arrives from inside it.
+            var ios = await MauiIosSimulatorSurfaceHostClient.StartAsync(hostDll, PrimaryFileName.ToString());
+            started = ios;
+        }
+        else
+        {
+            started = await MauiSurfaceHostClient.StartAsync(hostDll, PrimaryFileName.ToString());
+        }
         await UiThread.Switch();
         if (disposed)
         {
@@ -245,7 +311,11 @@ public sealed class MauiDesignerViewContent : AbstractViewContentHandlingLoadErr
         }
 
         // The child's own stderr belongs in the same channel: it is what explains a missing frame.
-        started.OutputLineReceived += line => Report("[host] " + line);
+        // OutputLineReceived is on the two concrete clients, not the shared interface.
+        if (started is MauiSurfaceHostClient macClient)
+            macClient.OutputLineReceived += line => Report("[host] " + line);
+        else if (started is MauiIosSimulatorSurfaceHostClient iosClient)
+            iosClient.OutputLineReceived += line => Report("[ios host] " + line);
         started.HostExited += (_, _) => SD.MainThread.InvokeAsyncAndForget(() => OnHostExited(started));
         Report($"Design host ready (pid {started.ProcessId}).");
         client = started;
@@ -300,12 +370,64 @@ public sealed class MauiDesignerViewContent : AbstractViewContentHandlingLoadErr
     /// <summary>Kills the design host process, as a crash would (DevFlow and tests).</summary>
     public void TerminateHost() => client?.TerminateHost();
 
-    /// <summary>The child host deployed beside the addin, preferring the native one.</summary>
-    internal static string? LocateHost()
+    /// <summary>Switches the view between the macOS and the iOS-Simulator design host. Every
+    /// accepted edit is preserved across the switch (the document is reopened from the last
+    /// accepted text). Returns the new state, or null when no host is up yet.</summary>
+    public async Task<DesignerSessionState?> SwitchDesignTargetAsync(string target)
+    {
+        target = NormalizeTarget(target);
+        if (target == designTarget)
+            return SessionState;
+
+        designTarget = target;
+        syncingTargetCombo = true;
+        if (targetCombo != null)
+            targetCombo.SelectedIndex = designTarget == TargetIos ? 1 : 0;
+        syncingTargetCombo = false;
+
+        var previous = client;
+        client = null;
+        connecting = null;
+        SessionState = null;
+        LastError = null;
+        if (previous != null)
+        {
+            // Dispose off the UI thread: the child's graceful shutdown can block briefly.
+            await Task.Run(() => previous.Dispose());
+        }
+
+        if (disposed)
+            return null;
+
+        var text = committedText ?? sourceText;
+        var changed = WasChangedInDesigner;
+        Loaded = RecoverAsync(text, changed);
+        await Loaded;
+        return SessionState;
+    }
+
+    internal static string NormalizeTarget(string? target)
+    {
+        target = target?.Trim().ToLowerInvariant();
+        return target is "ios" or "iphone" or "simulator" or "ios-simulator" ? TargetIos : TargetMac;
+    }
+
+    /// <summary>The iOS host needs the macOS toolchain and a simulator; the macOS host needs this
+    /// platform to be macOS as well. The model-only host is the fallback where either is missing.</summary>
+    internal static string? LocateHostFor(string target)
     {
         var addinDirectory = Path.GetDirectoryName(typeof(MauiDesignerViewContent).Assembly.Location);
         if (string.IsNullOrEmpty(addinDirectory))
             return null;
+        if (target == TargetIos)
+        {
+            if (!OperatingSystem.IsMacOS())
+                return null;
+            var ios = Path.Combine(addinDirectory, "Host", NativeIosHostExecutable);
+            // simctl expects the bundle (the directory); the inner executable check is the client's job.
+            return Directory.Exists(ios) ? ios : null;
+        }
+
         var candidates = OperatingSystem.IsMacOS()
             ? new[] { NativeMacHostExecutable, ModelHostFileName }
             : new[] { ModelHostFileName };
@@ -318,6 +440,10 @@ public sealed class MauiDesignerViewContent : AbstractViewContentHandlingLoadErr
 
         return null;
     }
+
+    /// <summary>The child host deployed beside the addin, preferring the native one. DevFlowStatus
+    /// uses this for "is a host expected" reporting.</summary>
+    internal static string? LocateHost() => LocateHostFor(TargetMac);
 
     #endregion
 

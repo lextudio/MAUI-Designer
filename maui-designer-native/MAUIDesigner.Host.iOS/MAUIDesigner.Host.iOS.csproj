@@ -1,0 +1,47 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The native MAUI design child for iOS: a real UIKit app bundle launched in the iOS Simulator.
+       Same DDP protocol as the macOS child; the addin installs and launches it with
+       `xcrun simctl` and the loopback connection is shared between the sim and the host Mac,
+       so no part of DesignerChildHost.Run changes. See OPENDEVELOP-ADDIN.md. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0-ios</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <!-- The MAUI workload (maui-tizen) is not required: the MAUI assemblies come from NuGet,
+         as in the macOS host. The ios workload IS required (builds the bundle). -->
+    <UseMaui>false</UseMaui>
+    <SupportedOSPlatformVersion>15.0</SupportedOSPlatformVersion>
+    <ApplicationId>com.lextudio.mauidesigner.host.ios</ApplicationId>
+    <AssemblyName>MAUIDesigner.Host.iOS</AssemblyName>
+    <RootNamespace>MAUIDesigner.Host.iOS</RootNamespace>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <OpenDevelopRoot Condition="'$(OpenDevelopRoot)' == ''">$(OPENDEVELOP_ROOT)</OpenDevelopRoot>
+    <OpenDevelopRoot>$([MSBuild]::EnsureTrailingSlash('$(OpenDevelopRoot)'))</OpenDevelopRoot>
+    <!-- Xcode 27 runs here; the installed macOS/iOS workloads (26.5.x) predate it and fail
+         _ValidateXcodeVersion. Same bypass as the macOS host until the workloads catch up. -->
+    <ValidateXcodeVersion>false</ValidateXcodeVersion>
+  </PropertyGroup>
+
+  <Target Name="ValidateOpenDevelopRoot" BeforeTargets="ResolveProjectReferences">
+    <Error Condition="!Exists('$(OpenDevelopRoot)src/Main/Designer/Designer.Server/Designer.Server.csproj')"
+           Text="Point OpenDevelopRoot (or the OPENDEVELOP_ROOT environment variable) at an OpenDevelop checkout." />
+  </Target>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Maui.Controls" Version="10.0.41" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="$(OpenDevelopRoot)src/Main/Designer/Designer.Server/Designer.Server.csproj" />
+    <ProjectReference Include="$(OpenDevelopRoot)src/Main/Designer/Designer.Remote/Designer.Remote.csproj" />
+    <ProjectReference Include="..\MAUIDesigner.Ddp\MAUIDesigner.Ddp.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The reflection catalog is platform-neutral MAUI type metadata: share the same source,
+         exactly as the Ddp service is shared with the macOS host. -->
+    <Compile Include="..\MAUIDesigner.Host\MauiReflectionTypeCatalog.cs" />
+  </ItemGroup>
+
+</Project>

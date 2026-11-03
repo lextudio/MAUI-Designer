@@ -86,7 +86,8 @@ public static class MauiDesignerDevFlowActions
         {
             success = result?.Accepted ?? state?.Accepted ?? false,
             active = true,
-            host = MauiDesignerViewContent.LocateHost(),
+            designTarget = view.DesignTarget,
+            host = MauiDesignerViewContent.LocateHostFor(view.DesignTarget),
             hostProcessId = view.HostProcessId,
             lastError = view.LastError,
             error = result?.Error,
@@ -297,6 +298,31 @@ public static class MauiDesignerDevFlowActions
 
     [DevFlowAction("od.maui-designer.theme", Description = "Preview in an app theme (\"Light\"/\"Dark\"), as the toolbar theme combo does")]
     public static string Theme(string theme) => Await(view => view.SetThemeAsync(theme));
+
+    [DevFlowAction("od.maui-designer.target", Description = "Switch the design host (\"mac\" / \"ios\"): the AppKit child on macOS vs the UIKit child in the iOS Simulator. Every accepted edit is preserved across the switch. Passing nothing reports the current target.")]
+    public static string Target(string target = "")
+    {
+        if (string.IsNullOrWhiteSpace(target))
+            return OnUi(() => Find() is { } view ? Describe(view) : JsonSerializer.Serialize(new { active = false }, Json));
+        // Switching may take seconds (simulator boot/install); do it off the UI thread and describe.
+        MauiDesignerViewContent? view = null;
+        Task<DesignerSessionState?>? operation = null;
+        SD.MainThread.InvokeIfRequired(() =>
+        {
+            view = Find();
+            if (view != null)
+                operation = view.SwitchDesignTargetAsync(target);
+        });
+        if (view == null || operation == null)
+            return Error("No MAUI designer is active.");
+        DesignerSessionState? state = null;
+        string? error = null;
+        try { state = Task.Run(async () => await operation.ConfigureAwait(false)).GetAwaiter().GetResult(); }
+        catch (Exception exception) { error = exception.GetBaseException().Message; }
+        return OnUi(() => error == null
+            ? Describe(view, state)
+            : JsonSerializer.Serialize(new { success = false, error, designTarget = view.DesignTarget }, Json));
+    }
 
     [DevFlowAction("od.maui-designer.design-size", Description = "Pick a design size preset by its label (e.g. \"Tablet 768x1024\"), as the toolbar combo does")]
     public static string DesignSize(string label)
