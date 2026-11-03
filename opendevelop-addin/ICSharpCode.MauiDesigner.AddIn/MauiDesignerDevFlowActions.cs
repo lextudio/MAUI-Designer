@@ -6,6 +6,7 @@ using ICSharpCode.SharpDevelop;
 using ICSharpCode.SharpDevelop.Designer.Remote;
 
 using LeXtudio.DevFlow.Agent.Core;
+using MAUIDesigner.Preview;
 using Microsoft.Maui.DevFlow.Agent.Core;
 
 namespace ICSharpCode.MauiDesigner;
@@ -92,6 +93,10 @@ public static class MauiDesignerDevFlowActions
                 key = view.PreviewTargetKey,
                 displayName = view.PreviewTargetName,
                 source = view.PreviewTargetSource.ToString(),
+                orientation = view.PreviewOrientation.ToString(),
+                deviceMetrics = view.DeviceMetrics is { } metrics
+                    ? new { metrics.Width, metrics.Height, metrics.Scale }
+                    : (object?)null,
                 note = view.PreviewNote,
                 projectFile = view.ProjectFile,
                 projectTargetFrameworks = view.ProjectTargetFrameworks.ToArray(),
@@ -337,6 +342,13 @@ public static class MauiDesignerDevFlowActions
             ? Describe(view, state)
             : JsonSerializer.Serialize(new { success = false, error, designTarget = view.DesignTarget }, Json));
     }
+
+    [DevFlowAction("od.maui-designer.orientation", Description = "Turn a simulator preview to \"portrait\" or \"landscape\": the same device at swapped canvas dimensions, no child restart; the choice is remembered with the target. macOS ignores it.")]
+    public static string Orientation(string orientation) =>
+        Await(view => view.SetOrientationAsync(
+            string.Equals(orientation?.Trim(), "landscape", StringComparison.OrdinalIgnoreCase)
+                ? PreviewOrientation.Landscape
+                : PreviewOrientation.Portrait));
 
     [DevFlowAction("od.maui-designer.design-size", Description = "Pick a design size preset by its label (e.g. \"Tablet 768x1024\"), as the toolbar combo does")]
     public static string DesignSize(string label)

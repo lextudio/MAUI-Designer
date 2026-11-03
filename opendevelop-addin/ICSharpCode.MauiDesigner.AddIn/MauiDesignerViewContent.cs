@@ -142,7 +142,7 @@ public sealed class MauiDesignerViewContent : AbstractViewContentHandlingLoadErr
         };
         combo.SelectionChanged += (_, _) =>
         {
-            if (syncingPreviewCombo || combo.SelectedItem is not PreviewTarget target)
+            if (syncingPreviewCombo || SelectedTarget(combo) is not { } target)
                 return;
             if (target.Key == previewTarget.Key)
                 return;
@@ -150,14 +150,49 @@ public sealed class MauiDesignerViewContent : AbstractViewContentHandlingLoadErr
             _ = SwitchPreviewTargetAsync(target, remember: true);
         };
         previewCombo = combo;
-        SyncPreviewCombo();
+
+        // The orientation toggle mirrors the IDE's device toolbar: it only means something for a
+        // simulator device, and it re-renders without restarting the child.
+        var orientation = new Button
+        {
+            Width = 26,
+            Height = 22,
+            Margin = new Thickness(4, 3, 0, 3),
+            Padding = new Thickness(0),
+            HorizontalContentAlignment = HorizontalAlignment.Center,
+            VerticalContentAlignment = VerticalAlignment.Center,
+        };
+        orientation.Click += (_, _) => _ = SetOrientationAsync(previewTarget.Toggled().Orientation);
+        orientationButton = orientation;
+
+        var row = new StackPanel { Orientation = Orientation.Horizontal };
+        row.Children.Add(combo);
+        row.Children.Add(orientation);
 
         var panel = new DockPanel();
-        DockPanel.SetDock(combo, Dock.Top);
-        panel.Children.Add(combo);
+        DockPanel.SetDock(row, Dock.Top);
+        panel.Children.Add(row);
         panel.Children.Add(surface);
         hostPanel = panel;
+        SyncPreviewCombo();
+        SyncOrientationButton();
         return panel;
+    }
+
+    static PreviewTarget? SelectedTarget(ComboBox combo) =>
+        (combo.SelectedItem as ComboBoxItem)?.Tag as PreviewTarget;
+
+    /// <summary>Re-labels the orientation button for the current target (disabled on macOS).</summary>
+    void SyncOrientationButton()
+    {
+        if (orientationButton == null)
+            return;
+        bool device = previewTarget.SupportsOrientation;
+        orientationButton.IsEnabled = device;
+        orientationButton.Content = PreviewIcons.For(previewTarget.Platform, previewTarget.Orientation);
+        orientationButton.ToolTip = device
+            ? "Orientation: " + previewTarget.Orientation + ". Click for " + previewTarget.Toggled().Orientation + "."
+            : "Orientation applies to simulator devices only.";
     }
 
     /// <summary>The shared design canvas. Public for DevFlow and tests.</summary>
@@ -175,12 +210,23 @@ public sealed class MauiDesignerViewContent : AbstractViewContentHandlingLoadErr
         {
             previewCombo.Items.Clear();
             foreach (var target in AvailablePreviewTargets)
-                previewCombo.Items.Add(target);
+            {
+                var label = new StackPanel { Orientation = Orientation.Horizontal };
+                label.Children.Add(PreviewIcons.For(target.Platform, target.Orientation));
+                label.Children.Add(new TextBlock
+                {
+                    Text = target.DisplayName,
+                    Margin = new Thickness(6, 0, 0, 0),
+                    VerticalAlignment = VerticalAlignment.Center,
+                });
+                previewCombo.Items.Add(new ComboBoxItem { Content = label, Tag = target });
+            }
 
             previewCombo.SelectedIndex = 0;
             for (var index = 0; index < previewCombo.Items.Count; index++)
             {
-                if (previewCombo.Items[index] is PreviewTarget item && item.Key == previewTarget.Key)
+                if (previewCombo.Items[index] is ComboBoxItem item
+                    && item.Tag is PreviewTarget candidate && candidate.Key == previewTarget.Key)
                 {
                     previewCombo.SelectedIndex = index;
                     break;
@@ -194,6 +240,7 @@ public sealed class MauiDesignerViewContent : AbstractViewContentHandlingLoadErr
                 _ => iosPreviewAvailable ? "project targets iOS" : previewNote ?? "project does not target iOS",
             };
             previewCombo.ToolTip = "Preview target (" + reason + "): " + previewTarget.DisplayName;
+            SyncOrientationButton();
         }
         finally
         {
@@ -258,6 +305,12 @@ public sealed class MauiDesignerViewContent : AbstractViewContentHandlingLoadErr
     /// <summary>Why iOS preview is or is not offered (null when it is).</summary>
     public string? PreviewNote => previewNote;
 
+    /// <summary>Portrait or Landscape for a simulator device; Portrait on macOS (meaningless).</summary>
+    public PreviewOrientation PreviewOrientation => previewTarget.Orientation;
+
+    /// <summary>The device's own logical size and scale, once the child reported it.</summary>
+    public (double Width, double Height, double Scale)? DeviceMetrics => deviceMetrics;
+
     public string? ProjectFile => projectFile;
 
     public IReadOnlyList<string> ProjectTargetFrameworks => projectTargetFrameworks;
@@ -279,8 +332,12 @@ public sealed class MauiDesignerViewContent : AbstractViewContentHandlingLoadErr
     string? previewNote;
     bool previewTargetInitialized;
     bool deviceSizeApplied;
+    // The simulator's own logical size and scale, from design/device-metrics: the canvas size for
+    // the current orientation, and what makes the orientation toggle a re-render instead of a restart.
+    (double Width, double Height, double Scale)? deviceMetrics;
     System.Windows.FrameworkElement? hostPanel;
     ComboBox? previewCombo;
+    Button? orientationButton;
     bool syncingPreviewCombo;
 
     /// <summary>The last session state the child returned, or null before the first open.</summary>
@@ -508,6 +565,7 @@ public sealed class MauiDesignerViewContent : AbstractViewContentHandlingLoadErr
         SessionState = null;
         LastError = null;
         deviceSizeApplied = false;
+        deviceMetrics = null;
         if (previous != null)
         {
             // Dispose off the UI thread: the child's graceful shutdown can block briefly.
@@ -597,20 +655,54 @@ public sealed class MauiDesignerViewContent : AbstractViewContentHandlingLoadErr
         }
     }
 
-    /// <summary>Sizes the canvas to the simulator's real screen, so picking an iPhone previews
-    /// that iPhone's exact surface instead of the generic phone preset.</summary>
+    /// <summary>
+    /// Rotates the device preview. Portrait and landscape are the same screen with the canvas
+    /// dimensions swapped, so this re-renders through design/set-design-size instead of restarting
+    /// the child. The choice is part of the remembered preview target.
+    /// </summary>
+    public async Task<DesignerSessionState?> SetOrientationAsync(PreviewOrientation orientation)
+    {
+        if (!previewTarget.SupportsOrientation)
+            return SessionState;
+
+        var updated = previewTarget.WithOrientation(orientation);
+        if (updated.Key == previewTarget.Key)
+            return SessionState;
+
+        previewTarget = updated;
+        previewTargetSource = PreviewTargetSource.Remembered;
+        RememberPreviewTarget(projectFile, updated.Key);
+        SyncPreviewCombo();
+
+        if (deviceMetrics is { } size)
+            return await SetDesignSizeAsync(OrientedWidth(size), OrientedHeight(size));
+
+        // The child is still starting; ApplyDeviceMetricsAsync will honour the orientation.
+        return SessionState;
+    }
+
+    double OrientedWidth((double Width, double Height, double Scale) size) =>
+        previewTarget.Orientation == PreviewOrientation.Landscape ? size.Height : size.Width;
+
+    double OrientedHeight((double Width, double Height, double Scale) size) =>
+        previewTarget.Orientation == PreviewOrientation.Landscape ? size.Width : size.Height;
+
+    /// <summary>Sizes the canvas to the simulator's real screen (in the current orientation), so
+    /// picking an iPhone previews that iPhone's exact surface instead of the generic phone preset.</summary>
     async Task ApplyDeviceMetricsAsync()
     {
         if (client is not MauiIosSimulatorSurfaceHostClient ios)
             return;
         try
         {
-            var metrics = await ios.GetDeviceMetricsAsync();
-            if (metrics is not { } size)
+            if (await ios.GetDeviceMetricsAsync() is not { } size)
                 return;
-            var state = await SetDesignSizeAsync(size.Width, size.Height);
+            deviceMetrics = size;
+            var width = OrientedWidth(size);
+            var height = OrientedHeight(size);
+            var state = await SetDesignSizeAsync(width, height);
             if (state?.Accepted == true)
-                Report($"Preview sized to {size.Width:0}×{size.Height:0} at {size.Scale:0.#}x ({previewTarget.DisplayName}).");
+                Report($"Preview sized to {width:0}×{height:0} at {size.Scale:0.#}x ({previewTarget.DisplayName}, {previewTarget.Orientation}).");
         }
         catch (Exception exception)
         {

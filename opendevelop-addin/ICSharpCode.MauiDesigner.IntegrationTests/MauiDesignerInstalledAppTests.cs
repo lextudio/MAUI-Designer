@@ -190,6 +190,20 @@ public sealed class MauiDesignerInstalledAppTests
             var iosGo = Bounds(Node(iosTree, "Go"));
             Assert.True(iosTitle.W > 0 && iosTitle.H > 0 && iosGo.W > 0 && iosGo.H > 0, status.ToString());
 
+            // Orientation: the same simulator at swapped dimensions, remembered with the target.
+            var landscape = await child.InvokeAsync("od.maui-designer.orientation", "landscape");
+            AssertOk(landscape, "landscape");
+            Assert.Equal("Landscape", landscape.GetProperty("preview").GetProperty("orientation").GetString());
+            Assert.EndsWith(":landscape", landscape.GetProperty("preview").GetProperty("key").GetString());
+            var landscapeFrame = landscape.GetProperty("frame");
+            Assert.True(landscapeFrame.GetProperty("Width").GetInt32() > landscapeFrame.GetProperty("Height").GetInt32(),
+                landscape.ToString());
+            var portrait = await child.InvokeAsync("od.maui-designer.orientation", "portrait");
+            AssertOk(portrait, "portrait");
+            Assert.Equal("Portrait", portrait.GetProperty("preview").GetProperty("orientation").GetString());
+            Assert.True(portrait.GetProperty("frame").GetProperty("Height").GetInt32()
+                > portrait.GetProperty("frame").GetProperty("Width").GetInt32(), portrait.ToString());
+
             // Back to macOS: the AppKit child reopens the same document (nothing was lost).
             var mac = await child.InvokeAsync("od.maui-designer.target", "macos");
             AssertOk(mac, "switch back to macOS");

@@ -58,9 +58,19 @@ The user-facing model is a **preview target**, not a host: one picker above the 
   `UIScreen` points and scale over `design/device-metrics` (a host-specific extension, wire shape
   `[width, height, scale]` so the MIT client shares no type with the GPL host), and the addin calls
   `design/set-design-size` with it. No device-dimension table exists in the addin.
+- **Orientation** is part of a device target: a toggle beside the picker turns the same simulator
+  from portrait to landscape. It swaps the canvas dimensions (the device's metrics are known after
+  the first frame), so it is a re-render through `design/set-design-size`, not a child restart, and
+  it is remembered with the target (`ios:<udid>:landscape`). macOS has no orientation, so the
+  toggle is disabled there.
+- The picker and the orientation toggle use the Visual Studio 2026 Image Library's 16×16 device
+  geometry (`Phone.xaml`, `PhoneLandscape.xaml`, `Computer.xaml`), embedded in the addin so it does
+  not depend on OpenDevelop's `Resources/VS2026` tree; the fill follows the theme's `Foreground`
+  brush.
 - `od.maui-designer.target` switches for the session only (`mac`, `ios`, `ios:<udid>`), and
-  `od.maui-designer.status` reports `preview.key/displayName/source/note/available` plus the
-  project's target frameworks, so scripts and tests can see what the project allows.
+  `od.maui-designer.status` reports `preview.key/displayName/source/orientation/deviceMetrics/note/available`
+  plus the project's target frameworks, so scripts and tests can see what the project allows.
+  `od.maui-designer.orientation portrait|landscape` drives the toggle.
 - `MAUIDESIGNER_IOS_UDID` still pins the device for scripted runs that bypass the picker.
 
 ### 2a. Cross-platform host plan (2026-09-28)
@@ -472,8 +482,15 @@ linker otherwise fails).
   canvas matches the simulator's own width, that switching to macOS marks the choice
   `ExplicitSession`, and that a specific `ios:<udid>` can be named; the macOS journey still asserts
   a plain `net10.0` project opens on macOS. Full class: 2/2 green.
+- Device orientation (2026-11-03, same change): the preview target carries `Portrait`/`Landscape`;
+  the toggle re-renders at swapped dimensions instead of restarting the child, and the remembered
+  key records it (`ios:<udid>:landscape`). Icons come from the VS2026 Image Library geometry
+  (phone portrait/landscape, computer) embedded in the addin. The iOS journey asserts the swap
+  (frame wider than tall in landscape, taller than wide in portrait) and that the key carries the
+  orientation.
 - Known gap: the picker is read once per view; a newly added `-ios` TFM is picked up when the
-  designer view is reopened, not live.
+  designer view is reopened, not live. The simulator window itself is not rotated (only the
+  rendered page is); the page's own layout is what the canvas shows.
 
 ### 2026-11-03 — iOS Simulator child lands
 

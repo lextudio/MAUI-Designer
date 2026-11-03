@@ -32,7 +32,7 @@ public static class PreviewTargetPolicy
         IReadOnlyList<SimulatorDevice> devices,
         out PreviewTargetSource source)
     {
-        if (!PreviewTarget.TryParseKey(rememberedKey, out var platform, out var udid))
+        if (!PreviewTarget.TryParseKey(rememberedKey, out var platform, out var udid, out var orientation))
         {
             source = PreviewTargetSource.ProjectDefault;
             return ProjectDefault(iosAvailable, devices);
@@ -53,7 +53,7 @@ public static class PreviewTargetPolicy
         }
 
         source = PreviewTargetSource.Remembered;
-        return PreviewTarget.ForDevice(device);
+        return PreviewTarget.ForDevice(device).WithOrientation(orientation);
     }
 
     /// <summary>Targets to list in the picker: macOS always (it is the no-toolchain fallback),

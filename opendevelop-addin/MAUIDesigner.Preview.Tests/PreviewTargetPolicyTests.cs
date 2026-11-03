@@ -106,17 +106,46 @@ public sealed class PreviewTargetPolicyTests
     [Fact]
     public void KeysRoundTrip()
     {
-        Assert.True(PreviewTarget.TryParseKey("mac", out var platform, out var udid));
+        Assert.True(PreviewTarget.TryParseKey("mac", out var platform, out var udid, out var orientation));
         Assert.Equal(PreviewPlatform.MacOSAppKit, platform);
         Assert.Null(udid);
+        Assert.Equal(PreviewOrientation.Portrait, orientation);
 
-        Assert.True(PreviewTarget.TryParseKey("ios:abc-123", out platform, out udid));
+        Assert.True(PreviewTarget.TryParseKey("ios:abc-123", out platform, out udid, out orientation));
         Assert.Equal(PreviewPlatform.IosSimulator, platform);
         Assert.Equal("abc-123", udid);
+        Assert.Equal(PreviewOrientation.Portrait, orientation);
+
+        Assert.True(PreviewTarget.TryParseKey("ios:abc-123:landscape", out platform, out udid, out orientation));
+        Assert.Equal("abc-123", udid);
+        Assert.Equal(PreviewOrientation.Landscape, orientation);
 
         Assert.False(PreviewTarget.TryParseKey("", out _, out _));
         Assert.False(PreviewTarget.TryParseKey("iphone", out _, out _));
-        Assert.Equal("ios:abc-123", new PreviewTarget(PreviewPlatform.IosSimulator,
-            new SimulatorDevice("abc-123", "iPhone", "iOS", "26.1", "Shutdown")).Key);
+        var device = new SimulatorDevice("abc-123", "iPhone", "iOS", "26.1", "Shutdown");
+        Assert.Equal("ios:abc-123", PreviewTarget.ForDevice(device).Key);
+        Assert.Equal("ios:abc-123:landscape",
+            PreviewTarget.ForDevice(device).WithOrientation(PreviewOrientation.Landscape).Key);
+    }
+
+    [Fact]
+    public void OrientationIsOnlyForDevices()
+    {
+        Assert.False(PreviewTarget.MacOS.SupportsOrientation);
+        var device = new SimulatorDevice("abc-123", "iPhone", "iOS", "26.1", "Shutdown");
+        var target = PreviewTarget.ForDevice(device);
+        Assert.True(target.SupportsOrientation);
+        Assert.Equal(PreviewOrientation.Landscape, target.Toggled().Orientation);
+        Assert.Equal(PreviewOrientation.Portrait, target.Toggled().Toggled().Orientation);
+        Assert.Equal(PreviewOrientation.Portrait, target.Orientation);
+    }
+
+    [Fact]
+    public void ARememberedLandscapeSurvivesProjectStartup()
+    {
+        var target = PreviewTargetPolicy.Resolve("ios:new-iphone:landscape", true, Devices, out var source);
+        Assert.Equal("new-iphone", target.Device!.Udid);
+        Assert.Equal(PreviewOrientation.Landscape, target.Orientation);
+        Assert.Equal(PreviewTargetSource.Remembered, source);
     }
 }

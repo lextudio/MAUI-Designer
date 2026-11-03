@@ -8,15 +8,36 @@ public enum PreviewPlatform
     IosSimulator,
 }
 
-/// <summary>A preview choice: a platform, plus the simulator device when the platform is iOS.</summary>
-public sealed record PreviewTarget(PreviewPlatform Platform, SimulatorDevice? Device = null)
+/// <summary>Which way a device-shaped preview is oriented. macOS has no orientation.</summary>
+public enum PreviewOrientation
+{
+    Portrait,
+    Landscape,
+}
+
+/// <summary>A preview choice: a platform, the simulator device when the platform is iOS, and the
+/// device orientation (portrait unless the user turned the device).</summary>
+public sealed record PreviewTarget(PreviewPlatform Platform, SimulatorDevice? Device = null,
+    PreviewOrientation Orientation = PreviewOrientation.Portrait)
 {
     public static PreviewTarget MacOS { get; } = new(PreviewPlatform.MacOSAppKit);
 
     public static PreviewTarget ForDevice(SimulatorDevice device) => new(PreviewPlatform.IosSimulator, device);
 
-    /// <summary>Stable key for remembering the choice: "mac" or "ios:&lt;udid&gt;".</summary>
-    public string Key => Platform == PreviewPlatform.MacOSAppKit ? "mac" : "ios:" + Device!.Udid;
+    /// <summary>Only a device has an orientation; the macOS window does not.</summary>
+    public bool SupportsOrientation => Platform == PreviewPlatform.IosSimulator;
+
+    /// <summary>Stable key for remembering the choice: "mac", "ios:&lt;udid&gt;" or
+    /// "ios:&lt;udid&gt;:landscape" (portrait is the default and is not spelled out).</summary>
+    public string Key => Platform == PreviewPlatform.MacOSAppKit
+        ? "mac"
+        : "ios:" + Device!.Udid + (Orientation == PreviewOrientation.Landscape ? ":landscape" : "");
+
+    public PreviewTarget WithOrientation(PreviewOrientation orientation) => this with { Orientation = orientation };
+
+    public PreviewTarget Toggled() => WithOrientation(Orientation == PreviewOrientation.Landscape
+        ? PreviewOrientation.Portrait
+        : PreviewOrientation.Landscape);
 
     public string DisplayName => Platform == PreviewPlatform.MacOSAppKit ? "macOS (AppKit)" : Device!.DisplayName;
 
@@ -24,10 +45,12 @@ public sealed record PreviewTarget(PreviewPlatform Platform, SimulatorDevice? De
     /// print the whole object graph.</summary>
     public override string ToString() => DisplayName;
 
-    public static bool TryParseKey(string? key, out PreviewPlatform platform, out string? udid)
+    public static bool TryParseKey(string? key, out PreviewPlatform platform, out string? udid,
+        out PreviewOrientation orientation)
     {
         platform = PreviewPlatform.MacOSAppKit;
         udid = null;
+        orientation = PreviewOrientation.Portrait;
         if (string.IsNullOrWhiteSpace(key))
             return false;
         if (string.Equals(key, "mac", StringComparison.OrdinalIgnoreCase))
@@ -36,12 +59,22 @@ public sealed record PreviewTarget(PreviewPlatform Platform, SimulatorDevice? De
         if (key.StartsWith(IosPrefix, StringComparison.OrdinalIgnoreCase) && key.Length > IosPrefix.Length)
         {
             platform = PreviewPlatform.IosSimulator;
-            udid = key[IosPrefix.Length..].Trim();
+            string rest = key[IosPrefix.Length..].Trim();
+            const string LandscapeSuffix = ":landscape";
+            if (rest.EndsWith(LandscapeSuffix, StringComparison.OrdinalIgnoreCase))
+            {
+                orientation = PreviewOrientation.Landscape;
+                rest = rest[..^LandscapeSuffix.Length];
+            }
+            udid = rest;
             return udid.Length > 0;
         }
 
         return false;
     }
+
+    public static bool TryParseKey(string? key, out PreviewPlatform platform, out string? udid) =>
+        TryParseKey(key, out platform, out udid, out _);
 }
 
 /// <summary>Where the current preview target came from, for the status report and the UI tooltip.</summary>
