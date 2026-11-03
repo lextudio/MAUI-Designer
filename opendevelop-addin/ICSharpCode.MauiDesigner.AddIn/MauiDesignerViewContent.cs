@@ -16,6 +16,7 @@ using ICSharpCode.SharpDevelop.WinForms;
 using ICSharpCode.SharpDevelop.Workbench;
 
 using MAUIDesigner.Ddp.Client;
+using MAUIDesigner.Preview;
 
 namespace ICSharpCode.MauiDesigner;
 
@@ -127,32 +128,32 @@ public sealed class MauiDesignerViewContent : AbstractViewContentHandlingLoadErr
         outline.SelectionCommitted += OnOutlineSelectionCommitted;
     }
 
-    /// <summary>The view's content: the shared design surface with a one-line toolbar atop
-    /// choosing the design host (macOS AppKit vs iOS Simulator). The addin is a LibreWPF/WPF
-    /// library, so the plain Controls are used.</summary>
+    /// <summary>The view's content: the shared design surface with a one-line preview-target
+    /// picker above it. The addin is a LibreWPF/WPF library, so the plain Controls are used.</summary>
     internal System.Windows.FrameworkElement HostPanel()
     {
         if (hostPanel != null)
             return hostPanel;
 
-        var combo = new System.Windows.Controls.ComboBox
+        var combo = new ComboBox
         {
-            Width = 230,
+            Width = 300,
             Margin = new Thickness(6, 3, 0, 3),
-            SelectedIndex = designTarget == TargetIos ? 1 : 0,
         };
-        combo.Items.Add("Design host: macOS (AppKit)");
-        combo.Items.Add("Design host: iOS Simulator");
         combo.SelectionChanged += (_, _) =>
         {
-            if (syncingTargetCombo)
+            if (syncingPreviewCombo || combo.SelectedItem is not PreviewTarget target)
                 return;
-            _ = SwitchDesignTargetAsync(combo.SelectedIndex == 1 ? TargetIos : TargetMac);
+            if (target.Key == previewTarget.Key)
+                return;
+            // A picker change is a deliberate user choice: remember it for the project.
+            _ = SwitchPreviewTargetAsync(target, remember: true);
         };
-        targetCombo = combo;
+        previewCombo = combo;
+        SyncPreviewCombo();
 
-        var panel = new System.Windows.Controls.DockPanel();
-        System.Windows.Controls.DockPanel.SetDock(combo, Dock.Top);
+        var panel = new DockPanel();
+        DockPanel.SetDock(combo, Dock.Top);
         panel.Children.Add(combo);
         panel.Children.Add(surface);
         hostPanel = panel;
@@ -162,21 +163,125 @@ public sealed class MauiDesignerViewContent : AbstractViewContentHandlingLoadErr
     /// <summary>The shared design canvas. Public for DevFlow and tests.</summary>
     public DesignSurface Surface => surface;
 
-    /// <summary>The design host kind the view targets. "mac" = the AppKit child; "ios" = the UIKit
-    /// child in the iOS Simulator. The choice is per document view and not persisted.</summary>
+    /// <summary>Rebuilds the picker from what the project allows and selects the current target.
+    /// Called when capabilities are read and whenever the target changes, never per edit.</summary>
+    void SyncPreviewCombo()
+    {
+        if (previewCombo == null)
+            return;
+
+        syncingPreviewCombo = true;
+        try
+        {
+            previewCombo.Items.Clear();
+            foreach (var target in AvailablePreviewTargets)
+                previewCombo.Items.Add(target);
+
+            previewCombo.SelectedIndex = 0;
+            for (var index = 0; index < previewCombo.Items.Count; index++)
+            {
+                if (previewCombo.Items[index] is PreviewTarget item && item.Key == previewTarget.Key)
+                {
+                    previewCombo.SelectedIndex = index;
+                    break;
+                }
+            }
+
+            var reason = previewTargetSource switch
+            {
+                PreviewTargetSource.Remembered => "remembered for this project",
+                PreviewTargetSource.ExplicitSession => "session override",
+                _ => iosPreviewAvailable ? "project targets iOS" : previewNote ?? "project does not target iOS",
+            };
+            previewCombo.ToolTip = "Preview target (" + reason + "): " + previewTarget.DisplayName;
+        }
+        finally
+        {
+            syncingPreviewCombo = false;
+        }
+    }
+
+    /// <summary>
+    /// Reads the project's capabilities and decides this view's first target. The project's target
+    /// frameworks decide what MAY be offered (iOS previews only when the project targets iOS or Mac
+    /// Catalyst and a simulator exists); a choice remembered for the project wins, otherwise a
+    /// booted/newest iPhone is the default. Called once per view before the first host starts.
+    /// </summary>
+    void EnsurePreviewTargetInitialized()
+    {
+        if (previewTargetInitialized)
+            return;
+        previewTargetInitialized = true;
+
+        // The IDE knows the owning project; when the XAML is not a project item yet (or the file
+        // was opened without a solution), the nearest csproj above it is the next best answer.
+        var project = SD.ProjectService.FindProjectContainingFile(PrimaryFileName);
+        projectFile = project?.FileName.ToString() ?? ProjectFiles.FindAbove(PrimaryFileName.ToString());
+        projectTargetFrameworks = MauiProjectPreview.ReadTargetFrameworksFromFile(projectFile);
+        var projectSupportsIos = MauiProjectPreview.SupportsIos(projectTargetFrameworks);
+        simulatorDevices = projectSupportsIos && OperatingSystem.IsMacOS() ? SimulatorDevices.Query() : [];
+        iosPreviewAvailable = projectSupportsIos && simulatorDevices.Any(d => d.CanPreview);
+        previewNote = !projectSupportsIos
+            ? (projectFile == null
+                ? "the XAML file has no project; iOS preview needs a project targeting iOS"
+                : "the project does not target iOS")
+            : !OperatingSystem.IsMacOS()
+                ? "iOS preview needs macOS with Xcode"
+                : iosPreviewAvailable
+                    ? null
+                    : "no iPhone or iPad simulator is installed";
+
+        var remembered = ReadRememberedPreviewTarget(projectFile);
+        previewTarget = PreviewTargetPolicy.Resolve(remembered, iosPreviewAvailable, simulatorDevices, out var source);
+        previewTargetSource = source;
+        SyncPreviewCombo();
+        Report("Preview target: " + previewTarget.DisplayName
+            + (source == PreviewTargetSource.Remembered ? " (remembered)" : " (from the project)")
+            + (previewNote == null ? "" : " — " + previewNote));
+    }
+
+    /// <summary>The current preview choice: "mac" or "ios:&lt;udid&gt;".</summary>
+    public string PreviewTargetKey => previewTarget.Key;
+
+    public string PreviewTargetName => previewTarget.DisplayName;
+
+    public PreviewTargetSource PreviewTargetSource => previewTargetSource;
+
+    /// <summary>"mac" / "ios": the design host kind (the shape DevFlow and the tests use).</summary>
+    public string DesignTarget =>
+        previewTarget.Platform == PreviewPlatform.IosSimulator ? TargetIos : TargetMac;
+
+    /// <summary>What the picker offers: macOS always, iOS devices only when the project allows.</summary>
+    public IReadOnlyList<PreviewTarget> AvailablePreviewTargets =>
+        PreviewTargetPolicy.Available(iosPreviewAvailable, simulatorDevices);
+
+    /// <summary>Why iOS preview is or is not offered (null when it is).</summary>
+    public string? PreviewNote => previewNote;
+
+    public string? ProjectFile => projectFile;
+
+    public IReadOnlyList<string> ProjectTargetFrameworks => projectTargetFrameworks;
+
+    /// <summary>The design host kind constants: "mac" = AppKit child, "ios" = UIKit child.</summary>
     public const string TargetMac = "mac";
 
     /// <summary><see cref="TargetMac"/> / <see cref="TargetIos"/></summary>
     public const string TargetIos = "ios";
 
-    string designTarget = TargetMac;
+    // Preview target state. The project's target frameworks gate the choices; the picker's pick
+    // is remembered per project (user settings, keyed by the project file path).
+    PreviewTarget previewTarget = PreviewTarget.MacOS;
+    PreviewTargetSource previewTargetSource = PreviewTargetSource.ProjectDefault;
+    string? projectFile;
+    IReadOnlyList<string> projectTargetFrameworks = [];
+    IReadOnlyList<SimulatorDevice> simulatorDevices = [];
+    bool iosPreviewAvailable;
+    string? previewNote;
+    bool previewTargetInitialized;
+    bool deviceSizeApplied;
     System.Windows.FrameworkElement? hostPanel;
-    System.Windows.Controls.ComboBox? targetCombo;
-    bool syncingTargetCombo;
-
-    /// <summary>Which design host the view starts. Changing it restarts the child and reopens the
-    /// document in the new host (every accepted edit is preserved).</summary>
-    public string DesignTarget => designTarget;
+    ComboBox? previewCombo;
+    bool syncingPreviewCombo;
 
     /// <summary>The last session state the child returned, or null before the first open.</summary>
     public DesignerSessionState? SessionState { get; private set; }
@@ -207,6 +312,7 @@ public sealed class MauiDesignerViewContent : AbstractViewContentHandlingLoadErr
 
     protected override void LoadInternal(OpenedFile file, Stream stream)
     {
+        EnsurePreviewTargetInitialized();
         UserContent = HostPanel();
         using (var reader = new StreamReader(stream, leaveOpen: true))
             sourceText = reader.ReadToEnd();
@@ -267,6 +373,12 @@ public sealed class MauiDesignerViewContent : AbstractViewContentHandlingLoadErr
             }
 
             Apply(state, fromDesigner: false);
+            if (state.Accepted && !deviceSizeApplied && previewTarget.Platform == PreviewPlatform.IosSimulator)
+            {
+                // Once per connection: the simulator's own screen is the canvas size.
+                deviceSizeApplied = true;
+                await ApplyDeviceMetricsAsync();
+            }
         }
         catch (Exception exception)
         {
@@ -283,8 +395,8 @@ public sealed class MauiDesignerViewContent : AbstractViewContentHandlingLoadErr
 
     async Task ConnectAsync()
     {
-        var isIos = designTarget == TargetIos;
-        var hostDll = LocateHostFor(designTarget)
+        var isIos = previewTarget.Platform == PreviewPlatform.IosSimulator;
+        var hostDll = LocateHostFor(isIos ? TargetIos : TargetMac)
             ?? throw new FileNotFoundException(
                 isIos
                     ? "The iOS MAUI design host is not installed next to the addin (expected Host/" + NativeIosHostExecutable + ")."
@@ -295,14 +407,18 @@ public sealed class MauiDesignerViewContent : AbstractViewContentHandlingLoadErr
         if (isIos)
         {
             // The child never spawns directly: the client installs and launches it in the
-            // simulator and the connection arrives from inside it.
-            var ios = await MauiIosSimulatorSurfaceHostClient.StartAsync(hostDll, PrimaryFileName.ToString());
+            // simulator the picker names, and the connection arrives from inside it. A cold
+            // simulator boot takes tens of seconds, so say which device is starting.
+            surface.SetLoading(true, "Starting " + previewTarget.DisplayName + "…");
+            var ios = await MauiIosSimulatorSurfaceHostClient.StartAsync(
+                hostDll, PrimaryFileName.ToString(), previewTarget.Device?.Udid);
             started = ios;
         }
         else
         {
             started = await MauiSurfaceHostClient.StartAsync(hostDll, PrimaryFileName.ToString());
         }
+        deviceSizeApplied = false;
         await UiThread.Switch();
         if (disposed)
         {
@@ -370,26 +486,28 @@ public sealed class MauiDesignerViewContent : AbstractViewContentHandlingLoadErr
     /// <summary>Kills the design host process, as a crash would (DevFlow and tests).</summary>
     public void TerminateHost() => client?.TerminateHost();
 
-    /// <summary>Switches the view between the macOS and the iOS-Simulator design host. Every
-    /// accepted edit is preserved across the switch (the document is reopened from the last
-    /// accepted text). Returns the new state, or null when no host is up yet.</summary>
-    public async Task<DesignerSessionState?> SwitchDesignTargetAsync(string target)
+    /// <summary>
+    /// Switches the view to another preview target. Every accepted edit is preserved (the document
+    /// is reopened from the last accepted text). <paramref name="remember"/> persists the choice
+    /// for this project; DevFlow switches stay session-only.
+    /// </summary>
+    public async Task<DesignerSessionState?> SwitchPreviewTargetAsync(PreviewTarget target, bool remember)
     {
-        target = NormalizeTarget(target);
-        if (target == designTarget)
+        if (target.Key == previewTarget.Key)
             return SessionState;
 
-        designTarget = target;
-        syncingTargetCombo = true;
-        if (targetCombo != null)
-            targetCombo.SelectedIndex = designTarget == TargetIos ? 1 : 0;
-        syncingTargetCombo = false;
+        previewTarget = target;
+        previewTargetSource = remember ? PreviewTargetSource.Remembered : PreviewTargetSource.ExplicitSession;
+        if (remember)
+            RememberPreviewTarget(projectFile, target.Key);
+        SyncPreviewCombo();
 
         var previous = client;
         client = null;
         connecting = null;
         SessionState = null;
         LastError = null;
+        deviceSizeApplied = false;
         if (previous != null)
         {
             // Dispose off the UI thread: the child's graceful shutdown can block briefly.
@@ -406,10 +524,98 @@ public sealed class MauiDesignerViewContent : AbstractViewContentHandlingLoadErr
         return SessionState;
     }
 
-    internal static string NormalizeTarget(string? target)
+    /// <summary>DevFlow/string form: "mac", "ios" (a device from the project's default), or
+    /// "ios:&lt;udid&gt;" for a specific simulator. Session-only, never remembered.</summary>
+    public async Task<DesignerSessionState?> SwitchDesignTargetAsync(string target)
     {
-        target = target?.Trim().ToLowerInvariant();
-        return target is "ios" or "iphone" or "simulator" or "ios-simulator" ? TargetIos : TargetMac;
+        EnsurePreviewTargetInitialized();
+
+        if (!PreviewTarget.TryParseKey(target, out var platform, out var udid))
+        {
+            var name = target?.Trim().ToLowerInvariant();
+            platform = name is "ios" or "iphone" or "simulator" or "ios-simulator"
+                ? PreviewPlatform.IosSimulator
+                : PreviewPlatform.MacOSAppKit;
+        }
+
+        if (platform == PreviewPlatform.MacOSAppKit)
+            return await SwitchPreviewTargetAsync(PreviewTarget.MacOS, remember: false);
+
+        var device = udid == null
+            ? null
+            : simulatorDevices.FirstOrDefault(d =>
+                d.CanPreview && string.Equals(d.Udid, udid, StringComparison.OrdinalIgnoreCase));
+        device ??= PreviewTargetPolicy.ProjectDefault(iosPreviewAvailable, simulatorDevices).Device;
+        if (device == null)
+        {
+            LastError = "No iOS simulator preview is available for this document"
+                + (previewNote == null ? "." : ": " + previewNote + ".");
+            Report(LastError);
+            return SessionState;
+        }
+
+        return await SwitchPreviewTargetAsync(PreviewTarget.ForDevice(device), remember: false);
+    }
+
+    /// <summary>User settings key for "which preview target this project uses".</summary>
+    static string RememberedPreviewTargetProperty(string? projectFile)
+    {
+        if (string.IsNullOrEmpty(projectFile))
+            return "";
+        var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes(projectFile.ToLowerInvariant())));
+        return "MAUIDesigner.PreviewTarget." + hash[..32];
+    }
+
+    static string? ReadRememberedPreviewTarget(string? projectFile)
+    {
+        var property = RememberedPreviewTargetProperty(projectFile);
+        if (property.Length == 0)
+            return null;
+        try
+        {
+            return PropertyService.Get(property, "") is { Length: > 0 } key ? key : null;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    static void RememberPreviewTarget(string? projectFile, string targetKey)
+    {
+        var property = RememberedPreviewTargetProperty(projectFile);
+        if (property.Length == 0)
+            return;
+        try
+        {
+            PropertyService.Set(property, targetKey);
+        }
+        catch (Exception)
+        {
+            // A settings write must never break the preview.
+        }
+    }
+
+    /// <summary>Sizes the canvas to the simulator's real screen, so picking an iPhone previews
+    /// that iPhone's exact surface instead of the generic phone preset.</summary>
+    async Task ApplyDeviceMetricsAsync()
+    {
+        if (client is not MauiIosSimulatorSurfaceHostClient ios)
+            return;
+        try
+        {
+            var metrics = await ios.GetDeviceMetricsAsync();
+            if (metrics is not { } size)
+                return;
+            var state = await SetDesignSizeAsync(size.Width, size.Height);
+            if (state?.Accepted == true)
+                Report($"Preview sized to {size.Width:0}×{size.Height:0} at {size.Scale:0.#}x ({previewTarget.DisplayName}).");
+        }
+        catch (Exception exception)
+        {
+            Report("Could not read the simulator's screen size: " + exception.GetBaseException().Message);
+        }
     }
 
     /// <summary>The iOS host needs the macOS toolchain and a simulator; the macOS host needs this

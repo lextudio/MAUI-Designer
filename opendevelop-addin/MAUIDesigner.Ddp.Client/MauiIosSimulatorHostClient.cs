@@ -1,11 +1,12 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Text;
-using System.Text.Json;
 
 using StreamJsonRpc;
 
 using ICSharpCode.SharpDevelop.Designer.Remote;
+
+using MAUIDesigner.Preview;
 
 namespace MAUIDesigner.Ddp.Client;
 
@@ -60,9 +61,12 @@ public sealed class MauiIosSimulatorSurfaceHostClient : IDesignHostClient,
         remove => connection.HostExited -= value;
     }
 
+    /// <param name="udid">The simulator the preview picker names; null picks the booted/newest
+    /// iPhone (see <c>MAUIDesigner.Preview</c> for the same policy the picker uses).</param>
     public static async Task<MauiIosSimulatorSurfaceHostClient> StartAsync(
         string hostBundlePath,
         string documentId,
+        string? udid = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(hostBundlePath);
@@ -71,7 +75,7 @@ public sealed class MauiIosSimulatorSurfaceHostClient : IDesignHostClient,
             throw new FileNotFoundException("The iOS MAUI design host is not installed next to the addin (expected Host/MAUIDesigner.Host.iOS.app).", hostBundlePath);
 
         string bundleId = ReadBundleId(hostBundlePath);
-        string udid = ResolveSimulatorUdid();
+        udid = string.IsNullOrWhiteSpace(udid) ? DefaultSimulatorUdid() : udid;
         Report("Preparing simulator " + udid + " for " + bundleId);
         await RunSimctlAsync(new[] { "bootstatus", udid, "-b" }, "bootstatus", cancellationToken);
         await RunSimctlAsync(new[] { "install", udid, hostBundlePath }, "install", cancellationToken);
@@ -122,6 +126,19 @@ public sealed class MauiIosSimulatorSurfaceHostClient : IDesignHostClient,
 
     public Task<string[]> CopyElementsAsync(long baseVersion, string[] elementIds, CancellationToken cancellationToken = default) =>
         connection.InvokeAsync<string[]>("design/copy-elements", WithIdentity(new { baseVersion, elementIds }), cancellationToken);
+
+    /// <summary>
+    /// The simulator device's real logical size and pixel scale, as [width, height, scale], or null
+    /// when the host does not report one. Primitive array on purpose: this client is MIT and must
+    /// not share a DTO type with the host assembly.
+    /// </summary>
+    public async Task<(double Width, double Height, double Scale)?> GetDeviceMetricsAsync(CancellationToken cancellationToken = default)
+    {
+        double[]? metrics = await connection.InvokeAsync<double[]?>("design/device-metrics", new { }, cancellationToken);
+        if (metrics is not [var width, var height, var scale] || width <= 0 || height <= 0 || scale <= 0)
+            return null;
+        return (width, height, scale);
+    }
 
     public Task<DesignerCapabilities> GetCapabilitiesAsync(CancellationToken cancellationToken = default) =>
         connection.InvokeAsync<DesignerCapabilities>("design/capabilities", new { }, cancellationToken);
@@ -206,52 +223,17 @@ public sealed class MauiIosSimulatorSurfaceHostClient : IDesignHostClient,
         return "com.lextudio.mauidesigner.host.ios";
     }
 
-    /// <summary>Picks a simulator: the environment override if set and valid, else a booted
-    /// iPhone, else the newest available iPhone.</summary>
-    static string ResolveSimulatorUdid()
+    /// <summary>The device the preview picker would choose when none is named: a booted iPhone,
+    /// else the newest iPhone. The environment override still wins, for scripted runs.</summary>
+    static string DefaultSimulatorUdid()
     {
         string? overrideUdid = Environment.GetEnvironmentVariable("MAUIDESIGNER_IOS_UDID");
-        var devices = ListAvailableDevices();
+        var devices = SimulatorDevices.Query();
         if (!string.IsNullOrWhiteSpace(overrideUdid))
-        {
-            var match = devices.FirstOrDefault(d => string.Equals(d.Udid, overrideUdid, StringComparison.OrdinalIgnoreCase));
-            return match.Udid ?? throw new InvalidOperationException($"MAUIDESIGNER_IOS_UDID ({overrideUdid}) is not a known simulator device.");
-        }
-
-        var iPhones = devices.Where(d => d.Name.StartsWith("iPhone", StringComparison.Ordinal)).ToArray();
-        if (iPhones.Length == 0)
-            throw new InvalidOperationException("No iPhone simulator is available. Install one with Xcode's Settings > Components.");
-
-        return iPhones.FirstOrDefault(d => d.State == "Booted").Udid
-            ?? iPhones.OrderByDescending(d => d.Runtime).First().Udid;
-    }
-
-    readonly record struct SimulatorDevice(string Udid, string Name, string Runtime, string State);
-
-    static IReadOnlyList<SimulatorDevice> ListAvailableDevices()
-    {
-        // `simctl list devices --json` is stable since Xcode 13.
-        string json = RunXcrun(new[] { "list", "devices", "available", "-j" });
-        using var document = JsonDocument.Parse(json);
-        var devices = new List<SimulatorDevice>();
-        if (document.RootElement.TryGetProperty("devices", out var runtimes) && runtimes.ValueKind == JsonValueKind.Object)
-        {
-            foreach (var runtime in runtimes.EnumerateObject())
-            {
-                if (runtime.Value.ValueKind != JsonValueKind.Array)
-                    continue;
-                foreach (var device in runtime.Value.EnumerateArray())
-                {
-                    string udid = device.GetProperty("udid").GetString() ?? "";
-                    string name = device.GetProperty("name").GetString() ?? "";
-                    string state = device.GetProperty("state").GetString() ?? "";
-                    if (udid.Length > 0)
-                        devices.Add(new SimulatorDevice(udid, name, runtime.Name, state));
-                }
-            }
-        }
-
-        return devices;
+            return overrideUdid;
+        var target = PreviewTargetPolicy.ProjectDefault(iosAvailable: true, devices);
+        return target.Device?.Udid
+            ?? throw new InvalidOperationException("No iPhone or iPad simulator is available. Install one with Xcode's Settings > Components.");
     }
 
     static async Task RunSimctlAsync(string[] args, string operation, CancellationToken cancellationToken)

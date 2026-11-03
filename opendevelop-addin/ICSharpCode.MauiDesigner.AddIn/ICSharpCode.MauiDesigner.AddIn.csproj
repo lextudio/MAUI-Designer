@@ -45,6 +45,9 @@
     <!-- MIT siblings only. This addin is MIT-licensed and must not reference, link or source-include
          anything from ../maui-designer-native (GPL); it talks to the GPL design host over DDP only. -->
     <ProjectReference Include="..\MAUIDesigner.Dialect\MAUIDesigner.Dialect.csproj" />
+    <!-- MIT-side preview policy: which previews the project's TFMs allow, the simulator device
+         list, and the remembered-choice rules. Pure logic, tested without an IDE. -->
+    <ProjectReference Include="..\MAUIDesigner.Preview\MAUIDesigner.Preview.csproj" />
     <ProjectReference Include="..\MAUIDesigner.Ddp.Client\MAUIDesigner.Ddp.Client.csproj" />
   </ItemGroup>
 

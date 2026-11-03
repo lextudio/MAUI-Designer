@@ -155,7 +155,9 @@ public sealed class MauiDesignerInstalledAppTests
         Directory.CreateDirectory(directory);
         var projectPath = Path.Combine(directory, "MauiIosJourney.csproj");
         var pagePath = Path.Combine(directory, "MainPage.xaml");
-        File.WriteAllText(projectPath, "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework><UseMaui>true</UseMaui></PropertyGroup></Project>");
+        // The project's target frameworks decide what the designer may preview: an iOS-capable
+        // project opens in the simulator by default, with no user action.
+        File.WriteAllText(projectPath, "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFrameworks>net10.0-android;net10.0-ios</TargetFrameworks><UseMaui>true</UseMaui></PropertyGroup></Project>");
         File.WriteAllText(pagePath, PageXaml);
         try
         {
@@ -166,30 +168,45 @@ public sealed class MauiDesignerInstalledAppTests
             var status = await child.InvokeAsync("od.maui-designer.status");
             AssertOk(status, "open");
             Assert.True(status.GetProperty("surface").GetProperty("hasRender").GetBoolean(), status.ToString());
-            Assert.Equal("mac", status.GetProperty("designTarget").GetString());
+            // csproj targets net10.0-ios, so the designer starts on a simulator without any action.
+            Assert.Equal("ios", status.GetProperty("designTarget").GetString());
+            var preview = status.GetProperty("preview");
+            Assert.Equal("ProjectDefault", preview.GetProperty("source").GetString());
+            Assert.StartsWith("ios:", preview.GetProperty("key").GetString());
+            Assert.Null(preview.GetProperty("note").GetString());
+            var available = preview.GetProperty("available").EnumerateArray()
+                .Select(t => t.GetProperty("key").GetString() ?? "")
+                .ToArray();
+            Assert.Contains("mac", available);
+            Assert.Contains(available, key => key.StartsWith("ios:"));
 
-            // Switch to the UIKit child: the same document, rendered in the iOS Simulator by the
-            // real iOS handlers (390x844 design units at the screen scale).
-            var ios = await child.InvokeAsync("od.maui-designer.target", "ios");
-            AssertOk(ios, "switch to iOS");
-            Assert.Equal("ios", ios.GetProperty("designTarget").GetString());
-            Assert.True(ios.GetProperty("surface").GetProperty("hasRender").GetBoolean(), ios.ToString());
-            var iosFrame = ios.GetProperty("frame");
-            Assert.Equal(390, iosFrame.GetProperty("Width").GetInt32() / iosFrame.GetProperty("Dpi").GetDouble(), 0);
-            Assert.True(iosFrame.GetProperty("Dpi").GetDouble() >= 2.0, ios.ToString());
-            var iosTree = ios.GetProperty("tree");
+            // Preview sized to the simulator's own screen (reported by the child), not to a preset.
+            var iosFrame = status.GetProperty("frame");
+            double iosWidth = iosFrame.GetProperty("Width").GetInt32() / iosFrame.GetProperty("Dpi").GetDouble();
+            var iosTree = status.GetProperty("tree");
+            Assert.Equal(Bounds(iosTree).W, iosWidth, 0);
+            Assert.True(iosFrame.GetProperty("Dpi").GetDouble() >= 2.0, status.ToString());
             var iosTitle = Bounds(Node(iosTree, "Title"));
             var iosGo = Bounds(Node(iosTree, "Go"));
-            Assert.True(iosTitle.W > 0 && iosTitle.H > 0 && iosGo.W > 0 && iosGo.H > 0, ios.ToString());
+            Assert.True(iosTitle.W > 0 && iosTitle.H > 0 && iosGo.W > 0 && iosGo.H > 0, status.ToString());
 
             // Back to macOS: the AppKit child reopens the same document (nothing was lost).
             var mac = await child.InvokeAsync("od.maui-designer.target", "macos");
             AssertOk(mac, "switch back to macOS");
             Assert.Equal("mac", mac.GetProperty("designTarget").GetString());
+            Assert.Equal("ExplicitSession", mac.GetProperty("preview").GetProperty("source").GetString());
             Assert.True(mac.GetProperty("surface").GetProperty("hasRender").GetBoolean(), mac.ToString());
+
+            // And a specific device can be named directly.
+            var iosAgain = await child.InvokeAsync("od.maui-designer.target", preview.GetProperty("key").GetString());
+            AssertOk(iosAgain, "switch back to the same simulator");
+            Assert.Equal("ios", iosAgain.GetProperty("designTarget").GetString());
         }
         finally
         {
+            // Leave no child behind: the collection's OpenDevelop is shared with the macOS journey.
+            try { await child.InvokeAsync("od.close-all-document-views"); } catch (Exception) { }
+            try { await _app.InvokeAsync("od.stop-project"); } catch (Exception) { }
             try { Directory.Delete(directory, recursive: true); } catch (Exception) { }
         }
     }

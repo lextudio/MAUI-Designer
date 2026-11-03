@@ -41,6 +41,18 @@ public sealed class UIKitMauiRenderer : IMauiDesignRenderer, IMauiTypeCatalog
 
     public UIKitMauiRenderer(IMauiContext context) => this.context = context;
 
+    /// <summary>The simulator device's own logical size and scale: what the designer should size
+    /// its canvas to, so the preview is exactly the device's screen.</summary>
+    public MauiDeviceMetrics? DeviceMetrics
+    {
+        get
+        {
+            var screen = window?.Screen ?? UIScreen.MainScreen;
+            var bounds = screen.Bounds;
+            return new MauiDeviceMetrics(bounds.Width, bounds.Height, screen.Scale);
+        }
+    }
+
     public MauiRenderResult Render(string xaml, long sequence, double width, double height, string theme)
     {
         if (!MainThread.IsMainThread)

@@ -44,9 +44,24 @@ is the proof of identity. The simulator shares the Mac's loopback stack, so the 
 to the IDE exactly like the macOS child (verified on-machine: the app opened a TCP connection to a
 127.0.0.1 listener from inside the sim).
 
-Per document view the target is chosen with one toolbar combo: **Design host: macOS (AppKit) /
-iOS Simulator**; `od.maui-designer.target` does the same from DevFlow. `MAUIDESIGNER_IOS_UDID`
-pins the simulator device (default: a booted iPhone, else the newest available iPhone).
+The user-facing model is a **preview target**, not a host: one picker above the surface lists
+**macOS (AppKit)** plus the iPhone/iPad simulators Xcode offers, e.g. `iPhone 17 Pro — iOS 26.1`.
+
+- The **project decides what can be offered** (`MAUIDesigner.Preview`): a project whose
+  `TargetFrameworks` contain `-ios` (or `-maccatalyst`) gets iOS targets; anything else gets macOS
+  only, and the picker's tooltip says why. XAML outside a project falls back to the nearest csproj
+  above it, then to macOS.
+- The **first default is project-derived** (a booted iPhone, else the newest iPhone, else an iPad,
+  else macOS), and the picker's **choice is remembered per project** in user settings (keyed by a
+  hash of the project path), so reopening the project reopens the same target.
+- Picking an iPhone/iPad **also sizes the canvas to that device**: the iOS child reports its
+  `UIScreen` points and scale over `design/device-metrics` (a host-specific extension, wire shape
+  `[width, height, scale]` so the MIT client shares no type with the GPL host), and the addin calls
+  `design/set-design-size` with it. No device-dimension table exists in the addin.
+- `od.maui-designer.target` switches for the session only (`mac`, `ios`, `ios:<udid>`), and
+  `od.maui-designer.status` reports `preview.key/displayName/source/note/available` plus the
+  project's target frameworks, so scripts and tests can see what the project allows.
+- `MAUIDESIGNER_IOS_UDID` still pins the device for scripted runs that bypass the picker.
 
 ### 2a. Cross-platform host plan (2026-09-28)
 
@@ -438,6 +453,27 @@ The addin project needs `SDKROOT` pointed at a real SDK on this machine (the CLT
 linker otherwise fails).
 
 ## 9. Progress log
+
+### 2026-11-03 — Preview targets: project-derived availability, remembered choice
+
+- Added the MIT-side `opendevelop-addin/MAUIDesigner.Preview` library (pure, `net10.0`, 32 unit
+  tests): csproj `TargetFrameworks` parsing, simulator-device JSON parsing, the nearest-csproj
+  fallback for files that are not project items, and the policy that picks the default/remembered
+  target. The addin and the DDP client both use it, so the picker and a direct client call cannot
+  disagree.
+- Replaced the temporary "Design host" combo with the preview-target picker described in §2a-bis.
+  Availability comes from the project, the default is project-derived, and an explicit pick is
+  remembered per project in user settings; DevFlow switches remain session-only.
+- The iOS child now implements `IMauiDesignRenderer.DeviceMetrics` from `UIScreen`; the host serves
+  it as `design/device-metrics` and the addin sizes the canvas to the device (402×874 on an
+  iPhone 17, for instance) instead of the generic 390×844 phone preset.
+- Integration: the iOS journey's temp project now targets `net10.0-android;net10.0-ios` and asserts
+  the designer **starts on iOS with no user action** (`preview.source == ProjectDefault`), that the
+  canvas matches the simulator's own width, that switching to macOS marks the choice
+  `ExplicitSession`, and that a specific `ios:<udid>` can be named; the macOS journey still asserts
+  a plain `net10.0` project opens on macOS. Full class: 2/2 green.
+- Known gap: the picker is read once per view; a newly added `-ios` TFM is picked up when the
+  designer view is reopened, not live.
 
 ### 2026-11-03 — iOS Simulator child lands
 

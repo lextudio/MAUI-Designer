@@ -15,6 +15,9 @@
 
   <ItemGroup>
     <ProjectReference Include="$(OpenDevelopRoot)src/Main/Designer/Designer.Remote/Designer.Remote.csproj" Private="false" />
+    <!-- The same device policy the preview picker uses, so a direct StartAsync without a UDID
+         picks the device the picker would have picked. -->
+    <ProjectReference Include="..\MAUIDesigner.Preview\MAUIDesigner.Preview.csproj" />
   </ItemGroup>
 
 </Project>

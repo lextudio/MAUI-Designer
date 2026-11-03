@@ -87,6 +87,18 @@ public static class MauiDesignerDevFlowActions
             success = result?.Accepted ?? state?.Accepted ?? false,
             active = true,
             designTarget = view.DesignTarget,
+            preview = new
+            {
+                key = view.PreviewTargetKey,
+                displayName = view.PreviewTargetName,
+                source = view.PreviewTargetSource.ToString(),
+                note = view.PreviewNote,
+                projectFile = view.ProjectFile,
+                projectTargetFrameworks = view.ProjectTargetFrameworks.ToArray(),
+                available = view.AvailablePreviewTargets
+                    .Select(t => new { key = t.Key, displayName = t.DisplayName })
+                    .ToArray(),
+            },
             host = MauiDesignerViewContent.LocateHostFor(view.DesignTarget),
             hostProcessId = view.HostProcessId,
             lastError = view.LastError,
@@ -123,7 +135,9 @@ public static class MauiDesignerDevFlowActions
         // Wait for any load/edit still in flight so a status read right after an action is stable.
         Task? pending = null;
         SD.MainThread.InvokeIfRequired(() => pending = Find()?.Loaded);
-        try { pending?.Wait(TimeSpan.FromSeconds(60)); } catch (Exception) { }
+        // A first iOS preview may boot a cold simulator and install the child before the frame
+        // exists; 60 s was not enough on a freshly created iOS 26.5 device.
+        try { pending?.Wait(TimeSpan.FromSeconds(180)); } catch (Exception) { }
         return OnUi(() => Find() is { } view ? Describe(view) : JsonSerializer.Serialize(new { active = false }, Json));
     }
 
@@ -299,7 +313,7 @@ public static class MauiDesignerDevFlowActions
     [DevFlowAction("od.maui-designer.theme", Description = "Preview in an app theme (\"Light\"/\"Dark\"), as the toolbar theme combo does")]
     public static string Theme(string theme) => Await(view => view.SetThemeAsync(theme));
 
-    [DevFlowAction("od.maui-designer.target", Description = "Switch the design host (\"mac\" / \"ios\"): the AppKit child on macOS vs the UIKit child in the iOS Simulator. Every accepted edit is preserved across the switch. Passing nothing reports the current target.")]
+    [DevFlowAction("od.maui-designer.target", Description = "Switch the preview target for this session: \"mac\" (AppKit), \"ios\" (a device from the project's available iOS simulators) or \"ios:<udid>\" for a specific simulator. Every accepted edit is preserved; the choice is not remembered (the picker remembers it). Passing nothing reports the current target and what is available.")]
     public static string Target(string target = "")
     {
         if (string.IsNullOrWhiteSpace(target))

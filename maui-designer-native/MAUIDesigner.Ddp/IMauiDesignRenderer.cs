@@ -18,7 +18,18 @@ public interface IMauiDesignRenderer
     /// <param name="height">The design canvas height.</param>
     /// <param name="theme">"Light" or "Dark": the app theme the page is rendered in.</param>
     MauiRenderResult Render(string xaml, long sequence, double width, double height, string theme);
+
+    /// <summary>
+    /// The logical surface this renderer represents, when it represents a real device (the iOS
+    /// Simulator): its point size and pixel scale. Null for a plain window (AppKit), where the
+    /// design size is the user's choice. The addin uses it so picking a simulator device also
+    /// picks that device's real size, instead of keeping a table of device dimensions.
+    /// </summary>
+    MauiDeviceMetrics? DeviceMetrics => null;
 }
+
+/// <summary>A device's logical size in MAUI units and its pixel scale.</summary>
+public sealed record MauiDeviceMetrics(double Width, double Height, double Scale);
 
 /// <summary>A rendered frame plus where each element landed.</summary>
 /// <param name="Frame">The bitmap, or null when nothing could be rendered.</param>

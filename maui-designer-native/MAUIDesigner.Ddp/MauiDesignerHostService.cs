@@ -49,6 +49,18 @@ public sealed class MauiDesignerHostService : IDesignerChildService
         _renderer = renderer;
     }
 
+    /// <summary>
+    /// Device metrics of the renderer (host-specific extension, like design/set-design-size):
+    /// the iOS child reports its UIScreen size, the AppKit child returns null. The wire shape is
+    /// a primitive array [width, height, scale] on purpose: the IDE-side client is MIT and must
+    /// not reference this (GPL) assembly, so no DTO is shared across the boundary.
+    /// </summary>
+    [JsonRpcMethod("design/device-metrics")]
+    public double[]? GetDeviceMetrics() =>
+        _renderer?.DeviceMetrics is { } metrics
+            ? [metrics.Width, metrics.Height, metrics.Scale]
+            : null;
+
     [JsonRpcMethod("initialize")]
     public HostHandshake Initialize(string token, int protocolVersion, string sessionId)
     {
